@@ -21,6 +21,7 @@
 #include <vector>
 #include <set>
 #include <unordered_set>
+#include <string.h>
 
 #include "command.hpp"
 #include "client.hpp"
@@ -42,6 +43,17 @@ template <class ReplyT> void Command<ReplyT>::wait() {
   unique_lock<mutex> lk(waiter_lock_);
   waiter_.wait(lk, [this]() { return waiting_done_.load(); });
   waiting_done_ = {false};
+}
+
+template<class ReplyT>
+bool Command<ReplyT>::moved()
+{
+    if (!ok()) {
+        if (0 == ::strncmp(lastError().c_str(), "MOVED", strlen("MOVED"))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 template <class ReplyT> void Command<ReplyT>::processReply(redisReply *r) {

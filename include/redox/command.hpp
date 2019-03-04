@@ -21,6 +21,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <functional>
 #include <atomic>
 #include <mutex>
@@ -34,6 +35,10 @@
 namespace redox {
 
 class Redox;
+
+namespace cluster {
+class Cluster;
+}
 
 /**
 * The Command class represents a single command string to be sent to
@@ -85,6 +90,12 @@ public:
   * is invoked for the first time.
   */
   void wait();
+
+  /**
+   * @brief moved 在集群环境下，如果连接的节点发生切换或者slot重新分配，会返回错误，并提示move到其他节点
+   * @return
+   */
+  bool moved();
 
   /**
   * Returns the command string represented by this object.
@@ -164,6 +175,7 @@ private:
   Command &operator=(const Command &) = delete;
 
   friend class Redox;
+  friend class cluster::Cluster;
 };
 
 } // End namespace redis
