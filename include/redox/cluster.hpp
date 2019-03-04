@@ -135,7 +135,7 @@ public:
         {
             return ;
         }
-        return rdx->m_handle.command<ReplyT>(cmdline, callback);
+        rdx->m_handle.command<ReplyT>(cmdline, callback);
     }
 
     /**
@@ -149,30 +149,37 @@ public:
      * @param cmdline 命令
      */
     template<typename ReplyT>
-    Command<ReplyT> &commandSync(const std::vector<std::string> &cmdline)
+    bool commandSync(const std::vector<std::string> &cmdline,
+                     const std::function<void(Command<ReplyT>&)> &callback = nullptr)
     {
-        std::string key = cmdline[1];
-        uint32_t slot = util::hash_slot(key.c_str(), key.length());
-        uint32_t node_index = this->findNodeBySlot(slot);
-
-        if (node_index >= m_nodes.size())
+        uint32_t node_index = 0;
+        if (cmdline.size() > 1)
         {
-            m_logger.error() << "key: " << key << ", "
-                             << "slot:" << slot << ", "
-                             << "node index:" << node_index << ", "
-                             << "node size:"  << m_nodes.size();
-             auto *c = new Command<ReplyT>(nullptr, 0, cmdline, nullptr, 0, 0, false, m_logger);
-             return *c;
+            std::string key = cmdline[1];
+            uint32_t slot = util::hash_slot(key.c_str(), key.length());
+            node_index = this->findNodeBySlot(slot);
+
+            if (node_index >= m_nodes.size())
+            {
+                m_logger.error() << "key: " << key << ", "
+                                 << "slot:" << slot << ", "
+                                 << "node index:" << node_index << ", "
+                                 << "node size:"  << m_nodes.size();
+                 return false;
+            }
         }
 
         std::shared_ptr<ClusterNode> rdx = m_nodes[node_index];
         if (rdx == nullptr)
         {
-            auto *c = new Command<ReplyT>(nullptr, 0, cmdline, nullptr, 0, 0, false, m_logger);
-            return *c;
+            return false;
         }
 
-        return rdx->m_handle.commandSync<ReplyT>(cmdline);
+        Command<ReplyT>& c = rdx->m_handle.commandSync<ReplyT>(cmdline);
+        if (callback) {
+            callback(c);
+        }
+        return true;
     }
 
     /**
@@ -236,9 +243,10 @@ public:
      * @return redis return
      */
     template<typename ReplyT>
-    Command<ReplyT> &evalSync(const char *script,
+    bool evalSync(const char *script,
                               const std::vector<std::string> &keys = {},
-                              const std::vector<std::string> &args = {}) {
+                              const std::vector<std::string> &args = {},
+                              const std::function<void(Command<ReplyT>&)> &callback = nullptr) {
         std::string key = util::join(keys.begin(), keys.end(), std::string("_"));
         uint32_t slot = util::hash_slot(key.c_str(), key.length());
         uint32_t node_index = this->findNodeBySlot(slot);
@@ -256,8 +264,7 @@ public:
         if (node_index >= m_nodes.size()) {
             m_logger.error() << "key: " << key << ", " << "slot:" << slot << ", "
                              << "node index:" << node_index << ", " << "node size:"  << m_nodes.size();
-            auto *c = new Command<ReplyT>(nullptr, 0, cmdline, nullptr, 0, 0, false, m_logger);
-            return *c;
+            return false;
         }
 
         std::shared_ptr<ClusterNode> rdx = m_nodes[node_index];
@@ -266,7 +273,11 @@ public:
             return *c;
         }
 
-        return rdx->m_handle.commandSync<ReplyT>(cmdline);
+        Command<ReplyT> c = rdx->m_handle.commandSync<ReplyT>(cmdline);
+        if (callback)
+            callback(c);
+
+        return true;
     }
 
 
