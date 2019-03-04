@@ -195,7 +195,7 @@ public:
     template<typename ReplyT>
     void eval(const char *script,
               const std::vector<std::string> &keys = {},
-              std::vector<std::string> args = {},
+              const std::vector<std::string> &args = {},
               const std::function<void(Command<ReplyT>&)> &callback = nullptr) {
 
         std::string key = util::join(keys.begin(), keys.end(), std::string("_"));
@@ -221,7 +221,7 @@ public:
         std::shared_ptr<ClusterNode> rdx = m_nodes[node_index];
         if (rdx == nullptr) { return ; }
 
-        return rdx->m_handle.commandSync<ReplyT>(cmdline);
+        rdx->m_handle.command<ReplyT>(cmdline);
     }
 
     /**

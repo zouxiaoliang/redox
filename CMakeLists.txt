@@ -9,8 +9,14 @@ set(REDOX_VERSION_STRING ${REDOX_VERSION_MAJOR}.${REDOX_VERSION_MINOR}.${REDOX_V
 option(lib "Build Redox as a dynamic library." ON)
 option(static_lib "Build Redox as a static library." ON)
 option(tests "Build all tests." OFF)
-option(examples "Build all examples." OFF)
+option(examples "Build all examples." ON)
 option(debug "Build debug version" ON)
+
+make_directory(${CMAKE_CURRENT_SOURCE_DIR}/target/libs)
+
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/target/arch)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/target/libs)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/target)
 
 # Use Release if no configuration specified
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
@@ -67,11 +73,11 @@ set(SRC_REDOX_CORE
     ${SRC_REDOX_DIR}/client.cpp
     ${SRC_REDOX_DIR}/command.cpp
     ${SRC_REDOX_DIR}/subscriber.cpp
-    ${SRC_REDOX_DIR}/client_cluster.cpp)
+    ${SRC_REDOX_DIR}/cluster.cpp)
 
 set(INC_REDOX_CORE
     ${INC_REDOX_DIR}/redox/client.hpp
-    ${INC_REDOX_DIR}/redox/client_cluster.hpp
+    ${INC_REDOX_DIR}/redox/cluster.hpp
     ${INC_REDOX_DIR}/redox/subscriber.hpp
     ${INC_REDOX_DIR}/redox/command.hpp)
 

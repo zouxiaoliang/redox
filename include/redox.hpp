@@ -21,6 +21,6 @@
 #pragma once
 
 #include "redox/client.hpp"
-#include "redox/client_cluster.hpp"
+#include "redox/cluster.hpp"
 #include "redox/command.hpp"
 #include "redox/subscriber.hpp"

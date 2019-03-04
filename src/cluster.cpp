@@ -1,4 +1,4 @@
-#include "client_cluster.hpp"
+#include "cluster.hpp"
 
 #include <string.h>
 
@@ -119,8 +119,10 @@ bool redox::cluster::Cluster::reflashRoute(redox::Redox &rdx, std::function<void
         rdx.disconnect();
         return false;
     }
+
     std::vector<std::string> nodes;
     util::split(r.reply(), nodes, "\r\n");
+
     TClusterNodes cluster_node;
     for (std::string node: nodes)
     {
@@ -198,6 +200,10 @@ bool redox::cluster::Cluster::isClusterOk(redox::Redox &rdx)
 
         std::vector<std::string> kv;
         util::split(line, kv, ":");
+
+        if (kv.size() < 2)
+            continue;
+
         if (kv[0] == "cluster_state" && kv[1] == "ok")
             return true;
     }

@@ -39,3 +39,4 @@ TODO.md
 # Eclipse
 .cproject
 .project
+*.user
