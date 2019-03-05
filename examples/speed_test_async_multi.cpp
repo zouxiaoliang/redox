@@ -37,7 +37,7 @@ int main(int argc, char* argv[]) {
   double t = 5; // s
   int parallel = 100;
 
-  cout << "Sending \"" << rdx.vecToStr(cmd_vec) << "\" asynchronously every "
+  cout << "Sending \"" << redox::util::vecToStr(cmd_vec) << "\" asynchronously every "
        << dt << "s for " << t << "s..." << endl;
 
   double t0 = time_s();

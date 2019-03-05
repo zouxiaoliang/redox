@@ -95,14 +95,14 @@ public:
     bool reflashRoute(Redox &rdx, std::function<void(int)> connection_callback = nullptr);
 
     /**
-     * @brief isCluster
+     * @brief isCluster 判断当前是否集群的redis环境
      * @param rdx
      * @return
      */
     static bool isCluster(Redox &rdx);
 
     /**
-     * @brief isClusterOk
+     * @brief isClusterOk 判断当前集群状态是否OK
      * @param rdx
      * @return
      */
@@ -244,9 +244,9 @@ public:
      */
     template<typename ReplyT>
     bool evalSync(const char *script,
-                              const std::vector<std::string> &keys = {},
-                              const std::vector<std::string> &args = {},
-                              const std::function<void(Command<ReplyT>&)> &callback = nullptr) {
+                  const std::vector<std::string> &keys = {},
+                  const std::vector<std::string> &args = {},
+                  const std::function<void(Command<ReplyT>&)> &callback = nullptr) {
         std::string key = util::join(keys.begin(), keys.end(), std::string("_"));
         uint32_t slot = util::hash_slot(key.c_str(), key.length());
         uint32_t node_index = this->findNodeBySlot(slot);
@@ -269,18 +269,45 @@ public:
 
         std::shared_ptr<ClusterNode> rdx = m_nodes[node_index];
         if (rdx == nullptr) {
-            auto *c = new Command<ReplyT>(nullptr, 0, cmdline, nullptr, 0, 0, false, m_logger);
-            return *c;
+            return false;
         }
 
-        Command<ReplyT> c = rdx->m_handle.commandSync<ReplyT>(cmdline);
+        Command<ReplyT> &c = rdx->m_handle.commandSync<ReplyT>(cmdline);
         if (callback)
             callback(c);
 
         return true;
     }
 
+    /**
+     * @brief get
+     * @param key
+     * @return
+     */
+    std::string get(const std::string &key);
 
+    /**
+     * @brief set
+     * @param key
+     * @param value
+     * @return
+     */
+    bool set(const std::string &key, const std::string &value);
+
+    /**
+     * @brief del
+     * @param key
+     * @return
+     */
+    bool del(const std::string &key);
+
+    /**
+     * @brief publish
+     * @param topic
+     * @param msg
+     * @return
+     */
+    void publish(const std::string &topic, const std::string &msg);
 private:
     /**
      * @brief findNodeBySlot 根据solt，计算出需要在那个节点执行命令

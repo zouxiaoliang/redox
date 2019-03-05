@@ -51,8 +51,7 @@ namespace redox {
 Redox::Redox(ostream &log_stream, log::Level log_level)
     : logger_(log_stream, log_level), evloop_(nullptr) {}
 
-bool Redox::connect(const string &host, const int port,
-                    function<void(int)> connection_callback) {
+bool Redox::connect(const string &host, const int port, function<void(int)> connection_callback) {
 
   host_ = host;
   port_ = port;
@@ -242,7 +241,6 @@ int Redox::getConnectState() {
   lock_guard<mutex> lk(connect_lock_);
   return connect_state_;
 }
-
 void Redox::setConnectState(int connect_state) {
   {
     lock_guard<mutex> lk(connect_lock_);
@@ -587,30 +585,6 @@ template <>
 unordered_map<long, Command<unordered_set<string>> *> &
 Redox::getCommandMap<unordered_set<string>>() {
   return commands_unordered_set_string_;
-}
-
-// ----------------------------
-// Helpers
-// ----------------------------
-
-string Redox::vecToStr(const vector<string> &vec, const char delimiter) {
-  string str;
-  for (size_t i = 0; i < vec.size() - 1; i++)
-    str += vec[i] + delimiter;
-  str += vec[vec.size() - 1];
-  return str;
-}
-
-vector<string> Redox::strToVec(const string &s, const char delimiter) {
-  vector<string> vec;
-  size_t last = 0;
-  size_t next = 0;
-  while ((next = s.find(delimiter, last)) != string::npos) {
-    vec.push_back(s.substr(last, next - last));
-    last = next + 1;
-  }
-  vec.push_back(s.substr(last));
-  return vec;
 }
 
 void Redox::command(const vector<string> &cmd) { command<redisReply *>(cmd, nullptr); }

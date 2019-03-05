@@ -75,3 +75,23 @@ uint32_t redox::util::hash_slot(const char *key, int32_t keylen)
          * what is in the middle between { and }. */
     return crc16(key+s+1,e-s-1) & 16383;
 }
+
+std::string redox::util::vecToStr(const std::vector<std::string> &vec, const char delimiter) {
+    std::string str;
+    for (size_t i = 0; i < vec.size() - 1; i++)
+        str += vec[i] + delimiter;
+    str += vec[vec.size() - 1];
+    return str;
+}
+
+std::vector<std::string> redox::util::strToVec(const std::string &s, const char delimiter) {
+    std::vector<std::string> vec;
+    size_t last = 0;
+    size_t next = 0;
+    while ((next = s.find(delimiter, last)) != std::string::npos) {
+        vec.push_back(s.substr(last, next - last));
+        last = next + 1;
+    }
+    vec.push_back(s.substr(last));
+    return vec;
+}

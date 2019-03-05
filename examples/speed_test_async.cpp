@@ -6,6 +6,7 @@
 
 #include <iostream>
 #include "redox.hpp"
+#include "utils/helper.hpp"
 
 using namespace std;
 using redox::Redox;
@@ -35,7 +36,7 @@ int main(int argc, char* argv[]) {
   double dt = 1 / freq; // s
   double t = 5; // s
 
-  cout << "Sending \"" << rdx.vecToStr(cmd_vec) << "\" asynchronously every "
+  cout << "Sending \"" << redox::util::vecToStr(cmd_vec) << "\" asynchronously every "
        << dt << "s for " << t << "s..." << endl;
 
   double t0 = time_s();

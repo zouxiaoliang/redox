@@ -130,7 +130,7 @@ template <class ReplyT> ReplyT Command<ReplyT>::reply() {
   return reply_val_;
 }
 
-template <class ReplyT> string Command<ReplyT>::cmd() const { return rdx_->vecToStr(cmd_); }
+template <class ReplyT> string Command<ReplyT>::cmd() const { return redox::util::vecToStr(cmd_); }
 
 template <class ReplyT> bool Command<ReplyT>::isExpectedReply(int type) {
 

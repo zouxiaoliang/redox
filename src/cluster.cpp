@@ -261,6 +261,94 @@ bool redox::cluster::Cluster::commandSync(const std::vector<std::string> &cmdlin
     return rdx->m_handle.commandSync(cmdline);
 }
 
+std::string redox::cluster::Cluster::get(const std::string &key)
+{
+    uint32_t slot = util::hash_slot(key.c_str(), key.length());
+    uint32_t node_index = this->findNodeBySlot(slot);
+
+    if (node_index >= m_nodes.size())
+    {
+        m_logger.error() << "key: " << key << ", "
+                         << "slot:" << slot << ", "
+                         << "node index:" << node_index << ", "
+                         << "node size:"  << m_nodes.size();
+        return "";
+    }
+
+    std::shared_ptr<ClusterNode> rdx = m_nodes[node_index];
+    if (rdx == nullptr)
+    {
+        return "";
+    }
+    return rdx->m_handle.get(key);
+}
+
+bool redox::cluster::Cluster::set(const std::string &key, const std::string &value)
+{
+    uint32_t slot = util::hash_slot(key.c_str(), key.length());
+    uint32_t node_index = this->findNodeBySlot(slot);
+
+    if (node_index >= m_nodes.size())
+    {
+        m_logger.error() << "key: " << key << ", "
+                         << "slot:" << slot << ", "
+                         << "node index:" << node_index << ", "
+                         << "node size:"  << m_nodes.size();
+        return false;
+    }
+
+    std::shared_ptr<ClusterNode> rdx = m_nodes[node_index];
+    if (rdx == nullptr)
+    {
+        return false;
+    }
+    return rdx->m_handle.set(key, value);
+}
+
+bool redox::cluster::Cluster::del(const std::string &key)
+{
+    uint32_t slot = util::hash_slot(key.c_str(), key.length());
+    uint32_t node_index = this->findNodeBySlot(slot);
+
+    if (node_index >= m_nodes.size())
+    {
+        m_logger.error() << "key: " << key << ", "
+                         << "slot:" << slot << ", "
+                         << "node index:" << node_index << ", "
+                         << "node size:"  << m_nodes.size();
+        return false;
+    }
+
+    std::shared_ptr<ClusterNode> rdx = m_nodes[node_index];
+    if (rdx == nullptr)
+    {
+        return false;
+    }
+    return rdx->m_handle.del(key);
+}
+
+void redox::cluster::Cluster::publish(const std::string &topic, const std::string &msg)
+{
+    uint32_t slot = util::hash_slot(topic.c_str(), topic.length());
+    uint32_t node_index = this->findNodeBySlot(slot);
+
+    if (node_index >= m_nodes.size())
+    {
+        m_logger.error() << "key: " << topic << ", "
+                         << "slot:" << slot << ", "
+                         << "node index:" << node_index << ", "
+                         << "node size:"  << m_nodes.size();
+        return;
+    }
+
+    std::shared_ptr<ClusterNode> rdx = m_nodes[node_index];
+    if (rdx == nullptr)
+    {
+        return;
+    }
+    rdx->m_handle.publish(topic, msg);
+}
+
 uint32_t redox::cluster::Cluster::findNodeBySlot(uint32_t slot)
 {
     uint32_t node_id = 0;

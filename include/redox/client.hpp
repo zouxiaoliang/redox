@@ -39,6 +39,7 @@
 #include <hiredis/adapters/libev.h>
 
 #include "utils/logger.hpp"
+#include "utils/helper.hpp"
 #include "command.hpp"
 
 namespace redox {
@@ -171,22 +172,6 @@ public:
     template <class ReplyT>
     void commandDelayed(const std::vector<std::string> &cmd,
                         const std::function<void(Command<ReplyT> &)> &callback, double after);
-
-    // ------------------------------------------------
-    // Utility methods
-    // ------------------------------------------------
-
-    /**
-     * Given a vector of strings, returns a string of the concatenated elements, separated
-     * by the delimiter. Useful for printing out a command string from a vector.
-     */
-    static std::string vecToStr(const std::vector<std::string> &vec, const char delimiter = ' ');
-
-    /**
-     * Given a command string, returns a vector of strings by splitting the input by
-     * the delimiter. Useful for turning a string input into a command.
-     */
-    static std::vector<std::string> strToVec(const std::string &s, const char delimiter = ' ');
 
     // ------------------------------------------------
     // Command wrapper methods for convenience only

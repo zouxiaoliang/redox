@@ -78,6 +78,18 @@ uint16_t crc16(const char *buf, int len);
 
 uint32_t hash_slot(const char *key, int32_t keylen);
 
+/**
+ * Given a vector of strings, returns a string of the concatenated elements, separated
+ * by the delimiter. Useful for printing out a command string from a vector.
+ */
+std::string vecToStr(const std::vector<std::string> &vec, const char delimiter = ' ');
+
+/**
+ * Given a command string, returns a vector of strings by splitting the input by
+ * the delimiter. Useful for turning a string input into a command.
+ */
+std::vector<std::string> strToVec(const std::string &s, const char delimiter = ' ');
+
 }
 
 }

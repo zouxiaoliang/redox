@@ -19,7 +19,7 @@ int main(int argc, char* argv[]) {
 
   rdx.del("mylist");
 
-  rdx.commandSync(rdx.strToVec("LPUSH mylist 1 2 3 4 5 6 7 8 9 10"));
+  rdx.commandSync(redox::util::strToVec("LPUSH mylist 1 2 3 4 5 6 7 8 9 10"));
 
   rdx.command<vector<string>>({"LRANGE", "mylist", "0", "4"},
     [](Command<vector<string>>& c){
@@ -30,7 +30,7 @@ int main(int argc, char* argv[]) {
     }
   );
 
-  rdx.command<unordered_set<string>>(rdx.strToVec("LRANGE mylist 0 4"),
+  rdx.command<unordered_set<string>>(redox::util::strToVec("LRANGE mylist 0 4"),
     [](Command<unordered_set<string>>& c){
       if(!c.ok()) return;
       cout << "Last 5 elements as a hash: ";
@@ -39,7 +39,7 @@ int main(int argc, char* argv[]) {
     }
   );
 
-  rdx.command<set<string>>(rdx.strToVec("LRANGE mylist 0 4"),
+  rdx.command<set<string>>(redox::util::strToVec("LRANGE mylist 0 4"),
     [&rdx](Command<set<string>>& c) {
       if(c.ok()) {
         cout << "Last 5 elements as a set: ";
