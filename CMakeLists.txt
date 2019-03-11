@@ -9,7 +9,7 @@ set(REDOX_VERSION_STRING ${REDOX_VERSION_MAJOR}.${REDOX_VERSION_MINOR}.${REDOX_V
 option(lib "Build Redox as a dynamic library." ON)
 option(static_lib "Build Redox as a static library." ON)
 option(tests "Build all tests." OFF)
-option(examples "Build all examples." ON)
+option(examples "Build all examples." OFF)
 option(debug "Build debug version" ON)
 
 make_directory(${CMAKE_CURRENT_SOURCE_DIR}/target/libs)
@@ -23,10 +23,11 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
    set(CMAKE_BUILD_TYPE Release)
 endif(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC -Wall")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC")
 if (debug)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -g -ggdb")
 endif()
+message(STATUS "cmake cxx flags: ${CMAKE_CXX_FLAGS}")
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
@@ -73,11 +74,13 @@ set(SRC_REDOX_CORE
     ${SRC_REDOX_DIR}/client.cpp
     ${SRC_REDOX_DIR}/command.cpp
     ${SRC_REDOX_DIR}/subscriber.cpp
-    ${SRC_REDOX_DIR}/cluster.cpp)
+    ${SRC_REDOX_DIR}/cluster.cpp
+    ${SRC_REDOX_DIR}/cluster_bata.cpp)
 
 set(INC_REDOX_CORE
     ${INC_REDOX_DIR}/redox/client.hpp
     ${INC_REDOX_DIR}/redox/cluster.hpp
+    ${INC_REDOX_DIR}/redox/cluster_bata.hpp
     ${INC_REDOX_DIR}/redox/subscriber.hpp
     ${INC_REDOX_DIR}/redox/command.hpp)
 

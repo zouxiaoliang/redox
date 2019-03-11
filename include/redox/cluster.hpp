@@ -3,6 +3,10 @@
 
 #include <iostream>
 
+#include <hiredis/hiredis.h>
+#include <hiredis/async.h>
+#include <hiredis/adapters/libev.h>
+
 #include "client.hpp"
 #include "command.hpp"
 
@@ -30,7 +34,18 @@ struct ClusterNode
         noflags     = 0                     // No flags at all.
     };
 
+    /**
+     * @brief init 初始化集群节点信息
+     * @param items 节点信息
+     * @param connection_callback 连接会调函数
+     * @return true/false
+     */
     bool init(std::vector<std::string> &items, std::function<void(int)> connection_callback=nullptr);
+
+    /**
+     * @brief fini 对象释放
+     */
+    void fini();
 
     Redox           m_handle;               // 连接对象
 

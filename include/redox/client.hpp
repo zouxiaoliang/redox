@@ -1,22 +1,22 @@
 /*
-* Redox - A modern, asynchronous, and wicked fast C++11 client for Redis
-*
-*    https://github.com/hmartiro/redox
-*
-* Copyright 2015 - Hayk Martirosyan <hayk.mart at gmail dot com>
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*    http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
+ * Redox - A modern, asynchronous, and wicked fast C++11 client for Redis
+ *
+ *    https://github.com/hmartiro/redox
+ *
+ * Copyright 2015 - Hayk Martirosyan <hayk.mart at gmail dot com>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #pragma once
 
@@ -49,9 +49,9 @@ static const int REDIS_DEFAULT_PORT = 6379;
 static const std::string REDIS_DEFAULT_PATH = "/var/run/redis/redis.sock";
 
 /**
-* Redox is a Redis client for C++. It provides a synchronous and asynchronous
-* API for using Redis in high-performance situations.
-*/
+ * Redox is a Redis client for C++. It provides a synchronous and asynchronous
+ * API for using Redis in high-performance situations.
+ */
 class Redox {
 
 public:
@@ -127,9 +127,9 @@ public:
      * exactly once. The Command object is provided to the callback, and the
      * memory for it is automatically freed when the callback returns.
      */
-    template <class ReplyT>
-    void command(const std::vector<std::string> &cmd,
-                 const std::function<void(Command<ReplyT> &)> &callback = nullptr);
+    template <class ReplyT> void command(
+            const std::vector<std::string> &cmd,
+            const std::function<void(Command<ReplyT> &)> &callback = nullptr);
 
     /**
      * Asynchronously runs a command and ignores any errors or replies.
@@ -141,7 +141,6 @@ public:
      * a reply is received or there is an error. The user is responsible for
      * calling .free() on the returned Command object.
      */
-
     template <class ReplyT> Command<ReplyT> &commandSync(const std::vector<std::string> &cmd);
 
     /**
@@ -156,11 +155,10 @@ public:
      * command is run only once. The user is responsible for calling .free()
      * on the returned Command object.
      */
-
-    template <class ReplyT>
-    Command<ReplyT> &commandLoop(const std::vector<std::string> &cmd,
-                                 const std::function<void(Command<ReplyT> &)> &callback,
-                                 double repeat, double after = 0.0);
+    template <class ReplyT> Command<ReplyT> &commandLoop(
+            const std::vector<std::string> &cmd,
+            const std::function<void(Command<ReplyT> &)> &callback,
+            double repeat, double after = 0.0);
 
     /**
      * Creates an asynchronous command that is run once after a given
@@ -168,10 +166,10 @@ public:
      * or error, and the Command object memory is automatically freed
      * after the callback returns.
      */
-
     template <class ReplyT>
-    void commandDelayed(const std::vector<std::string> &cmd,
-                        const std::function<void(Command<ReplyT> &)> &callback, double after);
+    void commandDelayed(
+            const std::vector<std::string> &cmd,
+            const std::function<void(Command<ReplyT> &)> &callback, double after);
 
     // ------------------------------------------------
     // Command wrapper methods for convenience only
@@ -201,6 +199,7 @@ public:
      */
     void publish(const std::string &topic, const std::string &msg);
 
+public:
     // ------------------------------------------------
     // Public members
     // ------------------------------------------------
@@ -236,12 +235,28 @@ private:
 
     // Setup code for the constructors
     // Return true on success, false on failure
+    /**
+     * @brief call initEv function to init libev loop, and set the "this PTR" to libev userdata;
+     * @return true on success, false on failure
+     */
     bool initEv();
+
+    /**
+     * @brief initHiredis init async redix context
+     * @return true on success, false on failure
+     */
     bool initHiredis();
 
     // Callbacks invoked on server connection/disconnection
     static void connectedCallback(const redisAsyncContext *c, int status);
     static void disconnectedCallback(const redisAsyncContext *c, int status);
+
+    /**
+     * @brief asyncFreeCallback 调用Command类的free接口，会执行该回掉函数
+     * @param c 异步redis对象指针
+     * @param id 命令id
+     */
+    static void asyncFreeCallback(const redisAsyncContext *c, int id);
 
     // Main event loop, run in a separate thread
     void runEventLoop();
@@ -301,6 +316,7 @@ private:
     int getExited();
     void setExited(bool exited);
 
+private:
     // ------------------------------------------------
     // Private members
     // ------------------------------------------------
@@ -342,6 +358,7 @@ private:
     std::mutex exit_lock_;
     std::condition_variable exit_waiter_;
 
+    // ------------------------------------------------
     // Maps of each Command, fetchable by the unique ID number
     // In C++14, member variable templates will replace all of these types
     // with a single templated declaration
@@ -357,8 +374,7 @@ private:
     std::unordered_map<long, Command<std::nullptr_t> *> commands_null_;
     std::unordered_map<long, Command<std::vector<std::string>> *> commands_vector_string_;
     std::unordered_map<long, Command<std::set<std::string>> *> commands_set_string_;
-    std::unordered_map<long, Command<std::unordered_set<std::string>> *>
-    commands_unordered_set_string_;
+    std::unordered_map<long, Command<std::unordered_set<std::string>> *> commands_unordered_set_string_;
     std::mutex command_map_guard_; // Guards access to all of the above
 
     // Command IDs pending to be sent to the server
@@ -368,13 +384,6 @@ private:
     // Commands IDs pending to be freed by the event loop
     std::queue<long> commands_to_free_;
     std::mutex free_queue_guard_;
-
-    // Commands use this method to deregister themselves from Redox,
-    // give it access to private members
-    template <class ReplyT> friend void Command<ReplyT>::free();
-
-    // Access to call disconnectedCallback
-    template <class ReplyT> friend void Command<ReplyT>::processReply(redisReply *r);
 };
 
 // ------------------------------------------------
@@ -392,8 +401,11 @@ Command<ReplyT> &Redox::createCommand(const std::vector<std::string> &cmd,
         }
     }
 
-    auto *c = new Command<ReplyT>(this, commands_created_.fetch_add(1), cmd,
-                                  callback, repeat, after, free_memory, logger_);
+    auto *c = Command<ReplyT>::createCommand(ctx_, commands_created_.fetch_add(1), cmd,
+                                   callback,
+                                   std::bind(Redox::disconnectedCallback, std::placeholders::_1, std::placeholders::_2),
+                                   std::bind(Redox::asyncFreeCallback, std::placeholders::_1, std::placeholders::_2),
+                                   repeat, after, free_memory, logger_);
 
     std::lock_guard<std::mutex> lg(queue_guard_);
     std::lock_guard<std::mutex> lg2(command_map_guard_);
@@ -426,7 +438,8 @@ void Redox::commandDelayed(const std::vector<std::string> &cmd,
     createCommand(cmd, callback, 0, after, true);
 }
 
-template <class ReplyT> Command<ReplyT> &Redox::commandSync(const std::vector<std::string> &cmd) {
+template <class ReplyT>
+Command<ReplyT> &Redox::commandSync(const std::vector<std::string> &cmd) {
     auto &c = createCommand<ReplyT>(cmd, nullptr, 0, 0, false);
     c.wait();
     return c;

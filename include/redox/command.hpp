@@ -1,22 +1,22 @@
 /*
-* Redox - A modern, asynchronous, and wicked fast C++11 client for Redis
-*
-*    https://github.com/hmartiro/redox
-*
-* Copyright 2015 - Hayk Martirosyan <hayk.mart at gmail dot com>
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*    http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
+ * Redox - A modern, asynchronous, and wicked fast C++11 client for Redis
+ *
+ *    https://github.com/hmartiro/redox
+ *
+ * Copyright 2015 - Hayk Martirosyan <hayk.mart at gmail dot com>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #pragma once
 
@@ -34,148 +34,226 @@
 
 namespace redox {
 
-class Redox;
-
 namespace cluster {
 class Cluster;
 }
 
 /**
-* The Command class represents a single command string to be sent to
-* a Redis server, for both synchronous and asynchronous usage. It manages
-* all of the state relevant to a single command string. A Command can also
-* represent a deferred or looping command, in which case the success or
-* error callbacks are invoked more than once.
-*/
+ * The Command class represents a single command string to be sent to
+ * a Redis server, for both synchronous and asynchronous usage. It manages
+ * all of the state relevant to a single command string. A Command can also
+ * represent a deferred or looping command, in which case the success or
+ * error callbacks are invoked more than once.
+ */
 template <class ReplyT> class Command {
 
 public:
-  // Reply codes
-  static const int NO_REPLY = -1;   // No reply yet
-  static const int OK_REPLY = 0;    // Successful reply of the expected type
-  static const int NIL_REPLY = 1;   // Got a nil reply
-  static const int ERROR_REPLY = 2; // Got an error reply
-  static const int SEND_ERROR = 3;  // Could not send to server
-  static const int WRONG_TYPE = 4;  // Got reply, but it was not the expected type
-  static const int TIMEOUT = 5;     // No reply, timed out
+    // Reply codes
+    static const int NO_REPLY = -1;   // No reply yet
+    static const int OK_REPLY = 0;    // Successful reply of the expected type
+    static const int NIL_REPLY = 1;   // Got a nil reply
+    static const int ERROR_REPLY = 2; // Got an error reply
+    static const int SEND_ERROR = 3;  // Could not send to server
+    static const int WRONG_TYPE = 4;  // Got reply, but it was not the expected type
+    static const int TIMEOUT = 5;     // No reply, timed out
 
-  /**
-  * Returns the reply status of this command.
-  */
-  int status() const { return reply_status_; }
+    static Command<ReplyT> * createCommand(redisAsyncContext *ctx,
+                                           long id,
+                                           const std::vector<std::string> &cmd,
+                                           const std::function<void(Command<ReplyT> &)> &callback,
+                                           const std::function<void(redisAsyncContext*, int)> &callback_error,
+                                           const std::function<void(redisAsyncContext*, int)> &notify_free,
+                                           double repeat,
+                                           double after,
+                                           bool free_memory,
+                                           log::Logger &logger);
 
-  std::string lastError() const { return last_error_; }
+    /**
+     * Returns the reply status of this command.
+     */
+    int status() const { return reply_status_; }
 
-  /**
-  * Returns true if this command got a successful reply.
-  */
-  bool ok() const { return reply_status_ == OK_REPLY; }
+    /**
+     * @brief lastError 最后的错误信息
+     * @return
+     */
+    std::string lastError() const { return last_error_; }
 
-  /**
-  * Returns the reply value, if the reply was successful (ok() == true).
-  */
-  ReplyT reply();
+    /**
+     * Returns true if this command got a successful reply.
+     */
+    bool ok() const { return reply_status_ == OK_REPLY; }
 
-  /**
-  * Tells the event loop to free memory for this command. The user is
-  * responsible for calling this on synchronous or looping commands,
-  * AKA when free_memory_ = false.
-  */
-  void free();
+    /**
+     * Returns the reply value, if the reply was successful (ok() == true).
+     *
+     * Create a copy of the reply and return it. Use a guard
+     * to make sure we don't return a reply while it is being
+     * modified.
+     */
+    ReplyT reply();
 
-  /**
-  * This method returns once this command's callback has been invoked
-  * (or would have been invoked if there is none) since the last call
-  * to wait(). If it is the first call, then returns once the callback
-  * is invoked for the first time.
-  */
-  void wait();
+    /**
+     * Tells the event loop to free memory for this command. The user is
+     * responsible for calling this on synchronous or looping commands,
+     * AKA when free_memory_ = false.
+     * This is the only method in Command that has access to private members of Redox
+     */
+    void free();
 
-  /**
-   * @brief moved 在集群环境下，如果连接的节点发生切换或者slot重新分配，会返回错误，并提示move到其他节点
-   * @return
-   */
-  bool moved();
+    /**
+     * This method returns once this command's callback has been invoked
+     * (or would have been invoked if there is none) since the last call
+     * to wait(). If it is the first call, then returns once the callback
+     * is invoked for the first time.
+     */
+    void wait();
 
-  /**
-  * Returns the command string represented by this object.
-  */
-  std::string cmd() const;
+    /**
+     * @brief moved 在集群环境下，如果连接的节点发生切换或者slot重新分配，会返回错误，并提示move到其他节点
+     * @return
+     */
+    bool moved();
 
-  // Allow public access to constructed data
-  Redox *const rdx_;
-  const long id_;
-  const std::vector<std::string> cmd_;
-  const double repeat_;
-  const double after_;
-  const bool free_memory_;
+    /**
+     * @brief moved 获取当前指令需要到那个节点运行
+     * @return 节点信息
+     */
+    bool moved(std::pair<std::string, int32_t> &where);
+
+    /**
+     * Returns the command string represented by this object.
+     */
+    std::string cmd() const;
+
+    /**
+     * @brief processReply Handles a new reply from the server
+     * @param r
+     */
+    void processReply(redisReply *r);
+
+    /**
+     * @brief parseReplyObject Invoke a user callback from the reply object.
+     * This method is specialized for each ReplyT of Command.
+     */
+    void parseReplyObject();
+
+    /**
+     * @brief invoke Directly invoke the user callback if it exists
+     */
+    void invoke();
+
+    /**
+     * @brief checkErrorReply
+     * @return
+     */
+    bool checkErrorReply();
+
+    /**
+     * @brief checkNilReply
+     * @return
+     */
+    bool checkNilReply();
+
+    /**
+     * @brief isExpectedReply
+     * @param type
+     * @return
+     */
+    bool isExpectedReply(int type);
+
+    /**
+     * @brief isExpectedReply
+     * @param typeA
+     * @param typeB
+     * @return
+     */
+    bool isExpectedReply(int typeA, int typeB);
+
+    /**
+     * @brief freeReply If needed, free the redisReply
+     */
+    void freeReply();
 
 private:
-  Command(Redox *rdx, long id, const std::vector<std::string> &cmd,
-          const std::function<void(Command<ReplyT> &)> &callback, double repeat, double after,
-          bool free_memory, log::Logger &logger);
+    /**
+     * @brief Command
+     * @note Explicitly delete copy constructor and assignment operator,
+     *  Command objects should never be copied because they hold
+     *  state with a network resource.
+     */
+    Command(const Command &) = delete;
+    Command &operator=(const Command &) = delete;
 
-  // Handles a new reply from the server
-  void processReply(redisReply *r);
+    /**
+     * @brief Command constructor
+     * @param ctx redis async context
+     * @param id command id
+     * @param cmd what is you command string
+     * @param callback
+     * @param callback_error when the command failed the function called
+     * @param notity_free notify the client free this command object
+     * @param repeat
+     * @param after
+     * @param free_memory is free?
+     * @param logger
+     */
+    Command(redisAsyncContext *ctx,
+            long id,
+            const std::vector<std::string> &cmd,
+            const std::function<void(Command<ReplyT> &)> &callback,
+            const std::function<void(redisAsyncContext*, int)> &callback_error,
+            const std::function<void(redisAsyncContext*, int)> &notify_free,
+            double repeat,
+            double after,
+            bool free_memory,
+            log::Logger &logger);
 
-  // Invoke a user callback from the reply object. This method is specialized
-  // for each ReplyT of Command.
-  void parseReplyObject();
+public:
+    // Allow public access to constructed data
+    redisAsyncContext *ctx_;
+    const long id_;
+    const std::vector<std::string> cmd_;
+    const double repeat_;
+    const double after_;
+    const bool free_memory_;
 
-  // Directly invoke the user callback if it exists
-  void invoke() {
-    if (callback_)
-      callback_(*this);
-  }
+    // The last server reply
+    redisReply *reply_obj_ = nullptr;
 
-  bool checkErrorReply();
-  bool checkNilReply();
-  bool isExpectedReply(int type);
-  bool isExpectedReply(int typeA, int typeB);
+    // User callback
+    const std::function<void(Command<ReplyT> &)> callback_;
+    const std::function<void(redisAsyncContext*, int)> callback_error_;
+    const std::function<void(redisAsyncContext*, int)> notify_free_;
 
-  // If needed, free the redisReply
-  void freeReply();
+    // Place to store the reply value and status.
+    ReplyT reply_val_;
+    int reply_status_;
+    std::string last_error_;
 
-  // The last server reply
-  redisReply *reply_obj_ = nullptr;
+    // How many messages sent to server but not received reply
+    std::atomic_int pending_ = {0};
 
-  // User callback
-  const std::function<void(Command<ReplyT> &)> callback_;
+    // Whether a repeating or delayed command is canceled
+    std::atomic_bool canceled_ = {false};
 
-  // Place to store the reply value and status.
-  ReplyT reply_val_;
-  int reply_status_;
-  std::string last_error_;
+    // libev timer watcher
+    ev_timer timer_;
+    std::mutex timer_guard_;
 
-  // How many messages sent to server but not received reply
-  std::atomic_int pending_ = {0};
+    // Access the reply value only when not being changed
+    std::mutex reply_guard_;
 
-  // Whether a repeating or delayed command is canceled
-  std::atomic_bool canceled_ = {false};
+    // For synchronous use
+    std::condition_variable waiter_;
+    std::mutex waiter_lock_;
+    std::atomic_bool waiting_done_ = {false};
 
-  // libev timer watcher
-  ev_timer timer_;
-  std::mutex timer_guard_;
+    // Passed on from Redox class
+    log::Logger &logger_;
 
-  // Access the reply value only when not being changed
-  std::mutex reply_guard_;
-
-  // For synchronous use
-  std::condition_variable waiter_;
-  std::mutex waiter_lock_;
-  std::atomic_bool waiting_done_ = {false};
-
-  // Passed on from Redox class
-  log::Logger &logger_;
-
-  // Explicitly delete copy constructor and assignment operator,
-  // Command objects should never be copied because they hold
-  // state with a network resource.
-  Command(const Command &) = delete;
-  Command &operator=(const Command &) = delete;
-
-  friend class Redox;
-  friend class cluster::Cluster;
+    // friend class
+    friend class cluster::Cluster;
 };
 
 } // End namespace redis

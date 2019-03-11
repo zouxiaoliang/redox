@@ -25,14 +25,14 @@ bool redox::cluster::Cluster::connect(const char *host, uint32_t port, std::func
     Redox rdx(m_log_stream, m_log_level);
     if (!rdx.connect(host, port))
     {
-        m_logger.debug() << "connect to redis node failed, redis node:(" << host << ":" << port << ")";
+        m_logger.error() << "connect to redis node failed, redis node:(" << host << ":" << port << ")";
         return false;
     }
 
     // check redis mode is cluster
     if (!isCluster(rdx))
     {
-        m_logger.debug() << "redis node is not cluster, redis node:(" << host << ":" << port << ")";
+        m_logger.error() << "redis node is not cluster, redis node:(" << host << ":" << port << ")";
         rdx.disconnect();
         return false;
     }
@@ -40,7 +40,7 @@ bool redox::cluster::Cluster::connect(const char *host, uint32_t port, std::func
     // check redis cluster status is ok?
     if (!isClusterOk(rdx))
     {
-        m_logger.debug() << "redis cluster node is not OK, redis node:(" << host << ":" << port << ")";
+        m_logger.error() << "redis cluster node is not OK, redis node:(" << host << ":" << port << ")";
         rdx.disconnect();
         return false;
     }
@@ -432,4 +432,9 @@ bool redox::cluster::ClusterNode::init(std::vector<std::string> &items, std::fun
     }
 
     return m_handle.connect(m_client_host, m_client_port, connection_callback);
+}
+
+void redox::cluster::ClusterNode::fini()
+{
+
 }
