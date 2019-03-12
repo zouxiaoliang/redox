@@ -77,7 +77,7 @@ bool redox::cluster_bata::ClusterNode::init(std::vector<std::string> &items, std
 
 void redox::cluster_bata::ClusterNode::fini()
 {
-    m_connect_state = EN_NOT_YET_CONNECTED;
+    setConnectState(EN_NOT_YET_CONNECTED);
     m_cluster = nullptr;
     m_ctx = nullptr;
 }
@@ -135,7 +135,7 @@ bool redox::cluster_bata::Cluster::connect(const char *host, uint32_t port, std:
     auto &c = rdx.commandSync<std::string>({"cluster", "nodes"});
 
     // slot range
-    return reflashRoute(c.reply(), m_user_connection_callback);
+    return connectNodes(c.reply(), m_user_connection_callback);
 }
 
 bool redox::cluster_bata::Cluster::connect(const char *nodes[], uint32_t node_count, std::function<void (int)> connection_callback)
@@ -212,7 +212,7 @@ void redox::cluster_bata::Cluster::wait()
 //    return false;
 //}
 
-bool redox::cluster_bata::Cluster::reflashRoute(const std::string &cluster_nodes/*redisAsyncContext *ctx*/, std::function<void (int)> connection_callback)
+bool redox::cluster_bata::Cluster::connectNodes(const std::string &cluster_nodes/*redisAsyncContext *ctx*/, std::function<void (int)> connection_callback)
 {
     // if libev event loop not init, must init libe
     if (nullptr == m_evloop)
@@ -247,7 +247,11 @@ bool redox::cluster_bata::Cluster::reflashRoute(const std::string &cluster_nodes
         // set note to ev loop failed?
         if (!initClusterNode(n.get())) continue;
 
+        // send the signal to the event loop, has an new async connection.
+        ev_async_send(m_evloop, &m_watcher_connection);
+
         // wait connect to the node successed.
+        m_logger.info() << "waiting connect to the node: (" << n->m_client_host << ":" << n->m_client_port << ")";
         n->waitConnected();
 
         // it's ok!!
@@ -398,13 +402,15 @@ void redox::cluster_bata::Cluster::runEventLoop()
     ev_async_start(m_evloop, &m_watcher_free);
 
     setRunning(true);
-
+    m_logger.info() << "Run the event loop, using NOWAIT if enabled for maximum throughput by avoiding any sleepin. nowait: " << (m_nowait? "enabled" : "disabled");
     // Run the event loop, using NOWAIT if enabled for maximum throughput by avoiding any sleepin
     while (!m_to_exit) {
         if (m_nowait) {
             ev_run(m_evloop, EVRUN_NOWAIT);
         } else {
+            m_logger.info() << "waiting the event ...";
             ev_run(m_evloop);
+            m_logger.info() << "the event arrived!!!";
         }
     }
 
@@ -435,7 +441,8 @@ void redox::cluster_bata::Cluster::runEventLoop()
 
 void redox::cluster_bata::Cluster::processConnection(struct ev_loop *loop, ev_async *async, int revents)
 {
-
+    auto self = (Cluster*)ev_userdata(loop);
+    self->m_logger.debug() << "plan to create an async connection ...";
 }
 
 void redox::cluster_bata::Cluster::processDisconnection(struct ev_loop *loop, ev_async *async, int revents)
@@ -506,27 +513,27 @@ bool redox::cluster_bata::Cluster::initClusterNode(redox::cluster_bata::ClusterN
 
     if (ctx->err) {
         m_logger.fatal() << "Could not create a hiredis context: " << ctx->errstr;
-        node->m_connect_state = ClusterNode::EN_INIT_ERROR;
+        node->setConnectState(ClusterNode::EN_INIT_ERROR);
         return false;
     }
 
     // Attach event loop to hiredis
     if (redisLibevAttach(m_evloop, ctx) != REDIS_OK) {
         m_logger.fatal() << "Could not attach libev event loop to hiredis.";
-        node->m_connect_state = ClusterNode::EN_INIT_ERROR;
+        node->setConnectState(ClusterNode::EN_INIT_ERROR);
         return false;
     }
 
     // Set the callbacks to be invoked on server connection/disconnection
     if (redisAsyncSetConnectCallback(ctx, Cluster::connectedCallback) != REDIS_OK) {
         m_logger.fatal() << "Could not attach connect callback to hiredis.";
-        node->m_connect_state = ClusterNode::EN_INIT_ERROR;
+        node->setConnectState(ClusterNode::EN_INIT_ERROR);
         return false;
     }
 
     if (redisAsyncSetDisconnectCallback(ctx, Cluster::disconnectedCallback) != REDIS_OK) {
         m_logger.fatal() << "Could not attach disconnect callback to hiredis.";
-        node->m_connect_state = ClusterNode::EN_INIT_ERROR;
+        node->setConnectState(ClusterNode::EN_INIT_ERROR);
         return false;
     }
 

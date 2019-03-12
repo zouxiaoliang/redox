@@ -230,10 +230,10 @@ public:
     //bool reflashRouteSelf(std::function<void(int)> connection_callback = nullptr);
 
     /**
-     * @brief reflashRoute 更新集群节点信息，以及状态，执行`CLUSTER INFO`得到集群状态
+     * @brief connectNodes 连接到集群节点
      * @return
      */
-    bool reflashRoute(const std::string &cluster_nodes/*redisAsyncContext *ctx*/, std::function<void(int)> connection_callback = nullptr);
+    bool connectNodes(const std::string &cluster_nodes/*redisAsyncContext *ctx*/, std::function<void(int)> connection_callback = nullptr);
 
     /**
      * @brief isCluster 判断当前是否集群的redis环境
@@ -489,6 +489,8 @@ public:
             freeReplyObject(reply_obj);
             return;
         }
+
+        // TODO: 需要对moved的操作进行处理，重新执行该命令
 
         c->processReply(reply_obj);
     }
