@@ -274,7 +274,7 @@ public:
     std::unordered_map<long, Command<ReplyT> *> &getCommandMap();
 
     template <class ReplyT>
-    Command<ReplyT> &createCommand(
+    Command<ReplyT> *createCommand(
             redisAsyncContext *ctx,
             const std::vector<std::string> &cmd,
             const std::function<void(Command<ReplyT> &)> &callback = nullptr,
@@ -282,26 +282,38 @@ public:
         {
             std::unique_lock<std::mutex> ul(m_running_lock);
             if (!m_running) {
-                throw std::runtime_error("[ERROR] Need to connect Redox before running commands!");
+                // throw std::runtime_error("[ERROR] Need to connect Redox before running commands!");
+                m_logger.error() << "Need to connect Redox before running commands!";
+                return nullptr;
             }
         }
 
-        auto *c = Command<ReplyT>::createCommand(ctx, m_commands_created.fetch_add(1), cmd,
-                                                 callback,
-                                                 std::bind(Cluster::disconnectedCallback, std::placeholders::_1, std::placeholders::_2),
-                                                 std::bind(Cluster::asyncFreeCallback, std::placeholders::_1, std::placeholders::_2),
-                                                 repeat, after, free_memory, m_logger);
+        auto c = Command<ReplyT>::createCommand(ctx, m_commands_created.fetch_add(1), cmd,
+                                                callback,
+                                                std::bind(Cluster::disconnectedCallback, std::placeholders::_1, std::placeholders::_2),
+                                                std::bind(Cluster::asyncFreeCallback, std::placeholders::_1, std::placeholders::_2),
+                                                repeat, after, free_memory, m_logger);
 
         std::lock_guard<std::mutex> lg(m_queue_guard);
         std::lock_guard<std::mutex> lg2(m_command_map_guard);
 
+        /* debug
+        if (!getCommandMap<ReplyT>().insert({c->id_, c}).second)
+        {
+            std::string cmdline;
+            util::join(c->cmd_.begin(), c->cmd_.end(), cmdline);
+            m_logger.error() << "insert into commamd map failed, cmd: " << cmdline;
+            delete c;
+            return nullptr;
+        }
+        */
         getCommandMap<ReplyT>()[c->id_] = c;
         m_command_queue.push(c->id_);
 
         // Signal the event loop to process this command
         ev_async_send(m_evloop, &m_watcher_command);
 
-        return *c;
+        return c;
     }
 
     /**
@@ -434,8 +446,9 @@ public:
 
         Command<ReplyT> *c = cluster->findCommand<ReplyT>(id);
         if (c == nullptr) {
-            cluster->m_logger.error() << "Couldn't find Command " << id
-                                 << " in command_map (submitCommandCallback).";
+            cluster->m_logger.error()
+                    << "Couldn't find Command " << id
+                    << " in command_map (submitCommandCallback).";
             return;
         }
 
@@ -486,13 +499,34 @@ public:
 
         Command<ReplyT> *c = cluster->findCommand<ReplyT>(id);
         if (c == nullptr) {
+            cluster->m_logger.error() << "command callback not find command in command maps!!!";
             freeReplyObject(reply_obj);
             return;
         }
 
         // TODO: 需要对moved的操作进行处理，重新执行该命令
+        auto move_to_other = [cluster, node, c](const std::string &host, int32_t port) {
+            for (auto n: cluster->m_nodes) {
+                if (n->m_client_host == host && n->m_client_port == port) {
+                    cluster->m_logger.debug()  << "("
+                                               << node->m_client_host << ":" << node->m_client_port
+                                               << ") moved to node ("
+                                               << n->m_client_host << ":" << n->m_client_port
+                                               << ")";
+                    c->ctx_ = n->m_ctx;
+                    ++ c->pending_;
+                    // 重新提交到事件环中
+                    std::lock_guard<std::mutex> lg(cluster->m_queue_guard);
+                    cluster->m_command_queue.push(c->id_);
 
-        c->processReply(reply_obj);
+                    // Signal the event loop to process this command
+                    ev_async_send(cluster->m_evloop, &cluster->m_watcher_command);
+                }
+            }
+        };
+
+        cluster->m_commands_callbacked.fetch_add(1);
+        c->processReply(reply_obj, move_to_other);
     }
 
     /**
@@ -557,6 +591,10 @@ public:
     template <class ReplyT> void deregisterCommand(const long id)
     {
         std::lock_guard<std::mutex> lg1(m_command_map_guard);
+        /* debug
+        if (getCommandMap<ReplyT>().find(id) == getCommandMap<ReplyT>().end())
+            m_logger.warning() << "id:" << id << " not in command map";
+        */
         getCommandMap<ReplyT>().erase(id);
         m_commands_deleted += 1;
     }
@@ -636,6 +674,7 @@ public:
         std::shared_ptr<ClusterNode> node = m_nodes[node_index];
         if (node == nullptr)
         {
+            m_logger.error() << "cluster node id: " << node_index << " is nullptr";
             return ;
         }
         createCommand<ReplyT>(node->m_ctx, cmdline, callback);
@@ -671,14 +710,16 @@ public:
         {
             return false;
         }
-        auto &c = createCommand<ReplyT>(node->m_ctx, cmdline, nullptr, 0, 0, false);
-        c.wait();
-        bool successed = c.ok();
+        auto c = createCommand<ReplyT>(node->m_ctx, cmdline, nullptr, 0, 0, false);
+        if (nullptr == c) return false;
+
+        c->wait();
+        bool successed = c->ok();
 
         if (callback) {
-            callback(c);
+            callback(*c);
         }
-        c.free();
+        c->free();
         return successed;
     }
 
@@ -824,8 +865,9 @@ private:
     ev_async m_watcher_free;            // For freeing commands
 
     // Track of Command objects allocated. Also provides unique Command IDs.
-    std::atomic_long m_commands_created = {0};
-    std::atomic_long m_commands_deleted = {0};
+    std::atomic_int64_t m_commands_created = {0};
+    std::atomic_int64_t m_commands_deleted = {0};
+    std::atomic_int64_t m_commands_callbacked = {0};
 
     // Separate thread to have a non-blocking event loop
     std::thread m_event_loop_thread;
@@ -860,11 +902,11 @@ private:
     std::mutex m_command_map_guard; // Guards access to all of the above
 
     // Command IDs pending to be sent to the server
-    std::queue<long> m_command_queue;
+    std::queue<int64_t> m_command_queue;
     std::mutex m_queue_guard;
 
     // Commands IDs pending to be freed by the event loop
-    std::queue<long> m_commands_to_free;
+    std::queue<int64_t> m_commands_to_free;
     std::mutex m_free_queue_guard;
 
     friend class ClusterNode;

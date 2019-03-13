@@ -32,7 +32,7 @@ using namespace std;
 namespace redox {
 
 template<class ReplyT>
-Command<ReplyT>::Command(redisAsyncContext *ctx, long id, const std::vector<string> &cmd,
+Command<ReplyT>::Command(redisAsyncContext *ctx, int64_t id, const std::vector<string> &cmd,
                          const std::function<void (Command<ReplyT> &)> &callback,
                          const std::function<void (redisAsyncContext *, int)> &callback_error,
                          const std::function<void (redisAsyncContext *, int)> &notify_free,
@@ -47,8 +47,7 @@ Command<ReplyT>::Command(redisAsyncContext *ctx, long id, const std::vector<stri
     callback_error_(callback_error),
     notify_free_(notify_free),
     last_error_(),
-    logger_(logger)
-{
+    logger_(logger) {
     timer_guard_.lock();
 }
 
@@ -56,6 +55,14 @@ template <class ReplyT> void Command<ReplyT>::wait() {
     unique_lock<mutex> lk(waiter_lock_);
     waiter_.wait(lk, [this]() { return waiting_done_.load(); });
     waiting_done_ = {false};
+}
+
+template<class ReplyT> void Command<ReplyT>::notifyAll() {
+    {
+        unique_lock<mutex> lk(waiter_lock_);
+        waiting_done_ = true;
+    }
+    waiter_.notify_all();
 }
 
 template <class ReplyT> bool Command<ReplyT>::moved()
@@ -92,7 +99,7 @@ template <class ReplyT> bool Command<ReplyT>::moved(std::pair<string, int32_t> &
     return false;
 }
 
-template <class ReplyT> void Command<ReplyT>::processReply(redisReply *r) {
+template <class ReplyT> void Command<ReplyT>::processReply(redisReply *r, std::function<void(const string, int32_t)> move_to_other) {
 
     last_error_.clear();
     reply_obj_ = r;
@@ -110,15 +117,16 @@ template <class ReplyT> void Command<ReplyT>::processReply(redisReply *r) {
         parseReplyObject();
     }
 
-    invoke();
+    std::pair<string, int32_t> where;
+    if (moved(where) && move_to_other) {
+        move_to_other(where.first, where.second);
+    } else {
+        invoke();
+    }
 
     pending_--;
 
-    {
-        unique_lock<mutex> lk(waiter_lock_);
-        waiting_done_ = true;
-    }
-    waiter_.notify_all();
+    notifyAll();
 
     // Always free the reply object for repeating commands
     if (repeat_ > 0) {
@@ -154,7 +162,7 @@ template <class ReplyT> void Command<ReplyT>::freeReply() {
 
 template <class ReplyT> Command<ReplyT> *Command<ReplyT>::createCommand(
         redisAsyncContext *ctx,
-        long id,
+        int64_t id,
         const std::vector<std::string> &cmd,
         const std::function<void(Command<ReplyT> &)> &callback,
         const std::function<void(redisAsyncContext*, int)> &callback_error,
@@ -162,8 +170,7 @@ template <class ReplyT> Command<ReplyT> *Command<ReplyT>::createCommand(
         double repeat,
         double after,
         bool free_memory,
-        log::Logger &logger)
-{
+        log::Logger &logger) {
     return new (std::nothrow) Command<ReplyT>(
                 ctx, id, cmd, callback, callback_error, notify_free, repeat, after, free_memory, logger);
 }
@@ -176,7 +183,9 @@ template <class ReplyT> ReplyT Command<ReplyT>::reply() {
     return reply_val_;
 }
 
-template <class ReplyT> string Command<ReplyT>::cmd() const { return redox::util::vecToStr(cmd_); }
+template <class ReplyT> string Command<ReplyT>::cmd() const {
+    return redox::util::vecToStr(cmd_);
+}
 
 template <class ReplyT> bool Command<ReplyT>::isExpectedReply(int type) {
 
@@ -223,7 +232,7 @@ template <class ReplyT> bool Command<ReplyT>::checkErrorReply() {
             last_error_ = reply_obj_->str;
         }
 
-        logger_.error() << cmd() << ": " << last_error_;
+        logger_.error() << "checkErrorReply: " << cmd() << ": " << last_error_;
         reply_status_ = ERROR_REPLY;
         return true;
     }

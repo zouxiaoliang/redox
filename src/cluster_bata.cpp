@@ -431,12 +431,13 @@ void redox::cluster_bata::Cluster::runEventLoop()
     {
         m_logger.error() << "All commands were not freed! " << deleted << "/" << created;
     }
+    m_logger.debug() << "created: " << created << ", deleted: " << deleted << ", processed: " << m_commands_callbacked;
 
     // Let go for block_until_stopped method
     setExited(true);
     setRunning(false);
 
-    m_logger.info() << "Event thread exited.";
+    m_logger.info() << "Event cluster thread exited.";
 }
 
 void redox::cluster_bata::Cluster::processConnection(struct ev_loop *loop, ev_async *async, int revents)
@@ -458,7 +459,7 @@ void redox::cluster_bata::Cluster::processQueuedCommands(struct ev_loop *loop, e
 
     while (!cluster->m_command_queue.empty()) {
 
-        long id = cluster->m_command_queue.front();
+        int64_t id = cluster->m_command_queue.front();
         cluster->m_command_queue.pop();
 
         if (cluster->processQueuedCommand<redisReply *>(id)) {
@@ -470,8 +471,10 @@ void redox::cluster_bata::Cluster::processQueuedCommands(struct ev_loop *loop, e
         } else if (cluster->processQueuedCommand<std::vector<std::string>>(id)) {
         } else if (cluster->processQueuedCommand<std::set<std::string>>(id)) {
         } else if (cluster->processQueuedCommand<std::unordered_set<std::string>>(id)) {
-        } else
-            throw std::runtime_error("Command pointer not found in any queue!");
+        } else {
+            // throw std::runtime_error("Command pointer not found in any queue!");
+            cluster->m_logger.error() << "Command pointer not found in any queue, id: " << id;
+        }
     }
 }
 

@@ -58,7 +58,7 @@ public:
     static const int TIMEOUT = 5;     // No reply, timed out
 
     static Command<ReplyT> * createCommand(redisAsyncContext *ctx,
-                                           long id,
+                                           int64_t id,
                                            const std::vector<std::string> &cmd,
                                            const std::function<void(Command<ReplyT> &)> &callback,
                                            const std::function<void(redisAsyncContext*, int)> &callback_error,
@@ -110,6 +110,11 @@ public:
     void wait();
 
     /**
+     * @brief notifyAll 通知当前命令已经处理完成
+     */
+    void notifyAll();
+
+    /**
      * @brief moved 在集群环境下，如果连接的节点发生切换或者slot重新分配，会返回错误，并提示move到其他节点
      * @return
      */
@@ -130,7 +135,7 @@ public:
      * @brief processReply Handles a new reply from the server
      * @param r
      */
-    void processReply(redisReply *r);
+    void processReply(redisReply *r, std::function<void(const std::string, int32_t)> move_to_other = nullptr);
 
     /**
      * @brief parseReplyObject Invoke a user callback from the reply object.
@@ -199,7 +204,7 @@ private:
      * @param logger
      */
     Command(redisAsyncContext *ctx,
-            long id,
+            int64_t id,
             const std::vector<std::string> &cmd,
             const std::function<void(Command<ReplyT> &)> &callback,
             const std::function<void(redisAsyncContext*, int)> &callback_error,
@@ -212,7 +217,7 @@ private:
 public:
     // Allow public access to constructed data
     redisAsyncContext *ctx_;
-    const long id_;
+    const int64_t id_;
     const std::vector<std::string> cmd_;
     const double repeat_;
     const double after_;
