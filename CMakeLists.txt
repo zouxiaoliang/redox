@@ -31,6 +31,18 @@ message(STATUS "cmake cxx flags: ${CMAKE_CXX_FLAGS}")
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
+message(STATUS "operation system platform is ${CMAKE_SYSTEM}")
+if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+    MESSAGE(STATUS "current platform: Linux ")
+    execute_process(COMMAND brew --prefix RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error_output OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_STRIP_TRAILING_WHITESPACE)
+    message(STATUS "code: ${result}, out: ${output}, err:${error_output}")
+    if (result EQUAL 0)
+        message(STATUS "brew prefix: ${output}")
+        set (HIREDIS_ROOT_DIR ${output})
+        set (LIBEV_ROOT_DIR ${output})
+    endif()
+endif()
+
 find_program(CCACHE_FOUND ccache)
 if(CCACHE_FOUND)
     message("Found ccache ${CCACHE_FOUND}")
