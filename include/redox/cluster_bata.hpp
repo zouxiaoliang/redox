@@ -532,7 +532,7 @@ public:
 
         Command<ReplyT> *c = cluster->findCommand<ReplyT>(id);
         if (c == nullptr) {
-            cluster->m_logger.error() << "command callback not find command in command maps!!!";
+            cluster->m_logger.error() << "command callback not find command in command maps, id: " << id;
             freeReplyObject(reply_obj);
             return;
         }
