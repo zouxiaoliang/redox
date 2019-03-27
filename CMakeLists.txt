@@ -102,7 +102,8 @@ set(SRC_REDOX_UTILS
 
 set(INC_REDOX_UTILS
     ${INC_REDOX_DIR}/redox/utils/logger.hpp
-    ${INC_REDOX_DIR}/redox/utils/helper.hpp)
+    ${INC_REDOX_DIR}/redox/utils/helper.hpp
+    ${INC_REDOX_DIR}/redox/utils/rwlock.hpp)
 
 set(INC_REDOX_WRAPPER ${INC_REDOX_DIR}/redox.hpp)
 

@@ -25,6 +25,7 @@
 
 #include "utils/logger.hpp"
 #include "utils/helper.hpp"
+#include "utils/rwlock.hpp"
 
 namespace redox {
 
@@ -54,6 +55,9 @@ void redox_ev_timer_init(ttimer timer, tcb cb, tafter after, trepeat repeat)
 
 class Cluster;
 
+/**
+ * @brief The ClusterNode struct  集群节点信息
+ */
 struct ClusterNode
 {
     // Connection states
@@ -153,6 +157,9 @@ struct ClusterNode
 
 typedef std::vector<std::shared_ptr<ClusterNode>> TClusterNodes;
 
+/**
+ * @brief The Cluster class 集群客户端
+ */
 class Cluster {
 public:
     Cluster(std::ostream &log_stream = std::cout, log::Level log_level = log::Debug);
@@ -219,6 +226,11 @@ public:
     void stop();
 
     /**
+     * @brief flush 等待所有命令执行完成
+     */
+    void flush();
+
+    /**
      * @brief wait 等待事件环推出
      */
     void wait();
@@ -251,13 +263,29 @@ public:
     static bool isClusterOk(Redox &rdx);
 
     /**
+     * @brief The EOK_STATUE enum 集群的操作状态
+     */
+    enum EOK_STATUE {
+        EN_WRITE_MASK       = 0x0000fffff,
+        EN_READ_MASK        = 0xffff00000,
+
+        EN_NO_OK            = 0x0,
+        EN_PART_WRITE_OK    = 0x1 << 0,
+        EN_WRITE_OK         = 0x1 << 15 | EN_PART_WRITE_OK,
+
+        EN_PART_READ_OK     = 0x1 << 16,
+        EN_READ_OK          = 0x1 << 31 | EN_PART_READ_OK,
+        EN_OK               = EN_WRITE_OK | EN_READ_OK,
+    };
+
+    /**
      * @brief
      * 判断集群的所有节点的连接都是OK的
      * 判断集群的所有节点写状态都是ok的
      * 判断集群的所有节点读状态都是ok的，如果master节点连接不上，则读取slave节点数据
      * @return true on ok, false on not ok
      */
-    bool ok();
+    int ok();
 
     // Callbacks invoked on server connection/disconnection
     static void connectedCallback(const redisAsyncContext *c, int status);
@@ -326,17 +354,17 @@ public:
     static void breakEventLoop(struct ev_loop *loop, ev_async *async, int revents);
 
     /**
-     * @brief getRunning
+     * @brief getRunning 获取事件环运行标记
      * @return
      */
-    int getRunning()
+    bool getRunning()
     {
         std::lock_guard<std::mutex> lg(m_running_lock);
         return m_running;
     }
 
     /**
-     * @brief setRunning
+     * @brief setRunning 设置事件环运行标记
      * @param running
      */
     void setRunning(bool running)
@@ -349,15 +377,19 @@ public:
     }
 
     /**
-     * @brief getExited
+     * @brief getExited 检查事件环是否推出
      * @return
      */
-    int getExited()
+    bool getExited()
     {
         std::lock_guard<std::mutex> lg(m_exit_lock);
         return m_exited;
     }
 
+    /**
+     * @brief setExited 设置事件环退出标记
+     * @param exited
+     */
     void setExited(bool exited)
     {
         {
@@ -507,6 +539,7 @@ public:
 
         // TODO: 需要对moved的操作进行处理，重新执行该命令
         auto move_to_other = [cluster, node, c](const std::string &host, int32_t port) {
+            util::ReaderGuard guard(cluster->m_nodes_lock);
             for (auto n: cluster->m_nodes) {
                 if (n->m_client_host == host && n->m_client_port == port) {
                     cluster->m_logger.debug()  << "("
@@ -663,6 +696,7 @@ public:
         uint32_t slot = util::hash_slot(key.c_str(), key.length());
         uint32_t node_index = this->findNodeBySlot(slot);
 
+        util::ReaderGuard guard(m_nodes_lock);
         if (node_index >= m_nodes.size())
         {
             m_logger.error() << "key: " << key << ", "
@@ -690,6 +724,7 @@ public:
                      const std::function<void(Command<ReplyT>&)> &callback = nullptr)
     {
         uint32_t node_index = 0;
+        util::ReaderGuard guard(m_nodes_lock);
         if (cmdline.size() > 1)
         {
             std::string key = cmdline[1];
@@ -755,6 +790,7 @@ public:
             cmdline.push_back(*iter);
         }
 
+        util::ReaderGuard guard(m_nodes_lock);
         if (node_index >= m_nodes.size()) {
             m_logger.error() << "key: " << key << ", " << "slot:" << slot << ", "
                              << "node index:" << node_index << ", " << "node size:"  << m_nodes.size();
@@ -797,6 +833,7 @@ public:
             cmdline.push_back(*iter);
         }
 
+        util::ReaderGuard guard(m_nodes_lock);
         if (node_index >= m_nodes.size()) {
             m_logger.error() << "key: " << key << ", " << "slot:" << slot << ", "
                              << "node index:" << node_index << ", " << "node size:"  << m_nodes.size();
@@ -838,14 +875,17 @@ private:
     bool initClusterNode(ClusterNode* node);
 
 private:
+    // 集群节点
     TClusterNodes   m_nodes;
+    util::RWLock    m_nodes_lock;
 
-    // Logger
+    // 日志记录器
     log::Logger     m_logger;
-    // stream
+    // 日志流
     std::ostream&   m_log_stream;
-    // level
+    // 日志级别
     log::Level      m_log_level;
+
     // connection callback function
     std::function<void (int)> m_user_connection_callback;
 
@@ -910,7 +950,7 @@ private:
     std::queue<int64_t> m_commands_to_free;
     std::mutex m_free_queue_guard;
 
-    friend class ClusterNode;
+    friend struct ClusterNode;
 };
 
 }}

@@ -171,6 +171,7 @@ bool redox::cluster_bata::Cluster::connect(const std::vector<std::string> &nodes
 
 void redox::cluster_bata::Cluster::disconnect()
 {
+    util::WriterGuard guard(m_nodes_lock);
     for (auto node: m_nodes)
     {
         if (nullptr == node)
@@ -191,6 +192,11 @@ void redox::cluster_bata::Cluster::stop()
     m_to_exit = true;
     m_logger.debug() << "cluster stop() called, breaking event loop";
     ev_async_send(m_evloop, &m_watcher_stop);
+}
+
+void redox::cluster_bata::Cluster::flush()
+{
+
 }
 
 void redox::cluster_bata::Cluster::wait()
@@ -262,6 +268,7 @@ bool redox::cluster_bata::Cluster::connectNodes(const std::string &cluster_nodes
     }
 
     // 更新集群的连接信息
+    util::WriterGuard guard(m_nodes_lock);
     m_nodes.swap(cluster_node);
 
     return true;
@@ -324,9 +331,21 @@ bool redox::cluster_bata::Cluster::isClusterOk(redox::Redox &rdx)
     return false;
 }
 
-bool redox::cluster_bata::Cluster::ok()
+int redox::cluster_bata::Cluster::ok()
 {
-    return false;
+    // 获取最新的节点信息，并将节点信息与当前的集群信息进行比对，更新节点状态
+    util::ReaderGuard guard(m_nodes_lock);
+    for(auto n: m_nodes) {
+        // 在self节点获取集群的节点信息，并与当前的节点信息进行比对
+        if (ClusterNode::myself == (n->m_flag & ClusterNode::myself)) {
+
+        }
+    }
+    // 检查所有节点状态
+    // 如果是slave则检查的是read状态
+    // 如果是master则检查的是write状态
+    // 返回最后的处理结果
+    return EN_NO_OK;
 }
 
 void redox::cluster_bata::Cluster::connectedCallback(const redisAsyncContext *c, int status)
