@@ -252,11 +252,18 @@ private:
     static void disconnectedCallback(const redisAsyncContext *c, int status);
 
     /**
+     * handle the error replay
+     */
+    template <class ReplyT> void parseReplyError(Command<ReplyT> &c, int error)
+    {
+
+    }
+
+    /**
      * @brief asyncFreeCallback 调用Command类的free接口，会执行该回掉函数
-     * @param c 异步redis对象指针
      * @param id 命令id
      */
-    static void asyncFreeCallback(const redisAsyncContext *c, int id);
+    void asyncFreeCallback(int id);
 
     // Main event loop, run in a separate thread
     void runEventLoop();
@@ -401,11 +408,17 @@ Command<ReplyT> &Redox::createCommand(const std::vector<std::string> &cmd,
         }
     }
 
-    auto *c = Command<ReplyT>::createCommand(ctx_, commands_created_.fetch_add(1), cmd,
-                                   callback,
-                                   std::bind(Redox::disconnectedCallback, std::placeholders::_1, std::placeholders::_2),
-                                   std::bind(Redox::asyncFreeCallback, std::placeholders::_1, std::placeholders::_2),
-                                   repeat, after, free_memory, logger_);
+    auto *c = Command<ReplyT>::createCommand(
+                this,
+                commands_created_.fetch_add(1),
+                cmd,
+                callback,
+                std::bind(&Redox::parseReplyError<ReplyT>, this, std::placeholders::_1, std::placeholders::_2),
+                std::bind(&Redox::asyncFreeCallback, this, std::placeholders::_1),
+                repeat,
+                after,
+                free_memory,
+                logger_);
 
     std::lock_guard<std::mutex> lg(queue_guard_);
     std::lock_guard<std::mutex> lg2(command_map_guard_);

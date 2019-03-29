@@ -180,12 +180,11 @@ void Redox::disconnectedCallback(const redisAsyncContext *ctx, int status) {
     }
 }
 
-void Redox::asyncFreeCallback(const redisAsyncContext *c, int id)
+void Redox::asyncFreeCallback(int id)
 {
-    Redox *rdx_ = (Redox*) c->data;
-    lock_guard<mutex> lg(rdx_->free_queue_guard_);
-    rdx_->commands_to_free_.push(id);
-    ev_async_send(rdx_->evloop_, &rdx_->watcher_free_);
+    lock_guard<mutex> lg(this->free_queue_guard_);
+    this->commands_to_free_.push(id);
+    ev_async_send(this->evloop_, &this->watcher_free_);
 }
 
 bool Redox::initEv() {
@@ -387,7 +386,7 @@ void Redox::commandCallback(redisAsyncContext *ctx, void *r, void *privdata) {
 template <class ReplyT>
 bool Redox::submitToServer(Command<ReplyT> *c) {
 
-    Redox *rdx = (Redox *)c->ctx_->data;
+    Redox *rdx = (Redox *)c->handle_;
     c->pending_++;
 
     // Construct a char** from the vector
@@ -509,7 +508,7 @@ bool Redox::freeQueuedCommand(long id) {
     // Stop the libev timer if this is a repeating command
     if ((c->repeat_ != 0) || (c->after_ != 0)) {
         lock_guard<mutex> lg(c->timer_guard_);
-        Redox *rdx = (Redox *)c->ctx_->data;
+        Redox *rdx = (Redox *)c->handle_;
         ev_timer_stop(rdx->evloop_, &c->timer_);
     }
 
@@ -546,7 +545,7 @@ long Redox::freeAllCommandsOfType() {
         // Stop the libev timer if this is a repeating command
         if ((c->repeat_ != 0) || (c->after_ != 0)) {
             lock_guard<mutex> lg3(c->timer_guard_);
-            Redox *rdx = (Redox *)c->ctx_->data;
+            Redox *rdx = (Redox *)c->handle_;
             ev_timer_stop(rdx->evloop_, &c->timer_);
         }
 
@@ -642,5 +641,7 @@ bool Redox::del(const string &key) {
 void Redox::publish(const string &topic, const string &msg) {
     command<redisReply *>({"PUBLISH", topic, msg});
 }
+
+
 
 } // End namespace redis

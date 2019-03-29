@@ -57,16 +57,34 @@ public:
     static const int WRONG_TYPE = 4;  // Got reply, but it was not the expected type
     static const int TIMEOUT = 5;     // No reply, timed out
 
-    static Command<ReplyT> * createCommand(redisAsyncContext *ctx,
+    /**
+     * @brief createCommand 创建待处理命令对象
+     * @param handle 命令的数据区
+     * @param id 命令id
+     * @param cmd 命令内容
+     * @param callback reply内容处理接口
+     * @param callback_error reply解析错误回调接口
+     * @param notify_free 释放id接口
+     * @param repeat 重复次数
+     * @param after 延迟处理
+     * @param free_memory 是否释放内存
+     * @param logger 日志记录器
+     * @return 待处理命令
+     */
+    static Command<ReplyT> * createCommand(void *handle,
                                            int64_t id,
                                            const std::vector<std::string> &cmd,
                                            const std::function<void(Command<ReplyT> &)> &callback,
-                                           const std::function<void(redisAsyncContext*, int)> &callback_error,
-                                           const std::function<void(redisAsyncContext*, int)> &notify_free,
+                                           const std::function<void(Command<ReplyT> &, int)> &callback_error,
+                                           const std::function<void(int)> &notify_free,
                                            double repeat,
                                            double after,
                                            bool free_memory,
                                            log::Logger &logger);
+
+    virtual ~Command() {
+        notifyAll();
+    }
 
     /**
      * Returns the reply status of this command.
@@ -192,7 +210,7 @@ private:
 
     /**
      * @brief Command constructor
-     * @param ctx redis async context
+     * @param handle anyting
      * @param id command id
      * @param cmd what is you command string
      * @param callback
@@ -203,12 +221,12 @@ private:
      * @param free_memory is free?
      * @param logger
      */
-    Command(redisAsyncContext *ctx,
+    Command(void *handle,
             int64_t id,
             const std::vector<std::string> &cmd,
             const std::function<void(Command<ReplyT> &)> &callback,
-            const std::function<void(redisAsyncContext*, int)> &callback_error,
-            const std::function<void(redisAsyncContext*, int)> &notify_free,
+            const std::function<void(Command<ReplyT> &, int)> &callback_error,
+            const std::function<void(int)> &notify_free,
             double repeat,
             double after,
             bool free_memory,
@@ -216,7 +234,7 @@ private:
 
 public:
     // Allow public access to constructed data
-    redisAsyncContext *ctx_;
+    void *handle_;
     const int64_t id_;
     const std::vector<std::string> cmd_;
     const double repeat_;
@@ -228,8 +246,8 @@ public:
 
     // User callback
     const std::function<void(Command<ReplyT> &)> callback_;
-    const std::function<void(redisAsyncContext*, int)> callback_error_;
-    const std::function<void(redisAsyncContext*, int)> notify_free_;
+    const std::function<void(Command<ReplyT> &, int)> callback_error_;
+    const std::function<void(int)> notify_free_;
 
     // Place to store the reply value and status.
     ReplyT reply_val_;

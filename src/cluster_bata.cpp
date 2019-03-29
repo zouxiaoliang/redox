@@ -3,8 +3,25 @@
 #include <string.h>
 #include <cstddef>
 
-bool redox::cluster_bata::ClusterNode::init(std::vector<std::string> &items, std::function<void (int)> connection_callback)
+redox::cluster_bata::Channel::Channel(redox::cluster_bata::Cluster *from):
+    m_cluster(from), m_ctx(nullptr),
+    m_id(), m_client_host(), m_client_port(), m_flag(0), m_master_id(), m_link_state(), m_slots(),
+    m_connect_state(EN_NOT_YET_CONNECTED)
+{}
+
+redox::cluster_bata::Channel::~Channel()
 {
+    disconnect();
+    fini();
+}
+
+bool redox::cluster_bata::Channel::init(std::vector<std::string> &items, std::function<void (int)> connection_callback)
+{
+    if (items.size() < 8)
+    {
+        return false;
+    }
+
     // [0] Node ID
     m_id = items[0];
 
@@ -69,17 +86,28 @@ bool redox::cluster_bata::ClusterNode::init(std::vector<std::string> &items, std
         }
     }
 
-    // 初始化context信息
+    return true;
+}
+
+void redox::cluster_bata::Channel::fini()
+{
+    setConnectState(EN_NOT_YET_CONNECTED);
+    m_cluster = nullptr;
+    m_ctx = nullptr;
+}
+
+bool redox::cluster_bata::Channel::connect()
+{
     m_ctx = redisAsyncConnect(m_client_host.c_str(), m_client_port);
 
     return (nullptr != m_ctx);
 }
 
-void redox::cluster_bata::ClusterNode::fini()
+void redox::cluster_bata::Channel::disconnect()
 {
-    setConnectState(EN_NOT_YET_CONNECTED);
-    m_cluster = nullptr;
-    m_ctx = nullptr;
+    std::cout << "redox::cluster_bata::Channel::disconnect (" << m_client_host << ":" << m_client_port << ")" << std::endl;
+    if (nullptr != m_ctx)
+        redisAsyncDisconnect(m_ctx);
 }
 
 redox::cluster_bata::Cluster::Cluster(std::ostream &log_stream, redox::log::Level log_level):
@@ -171,15 +199,8 @@ bool redox::cluster_bata::Cluster::connect(const std::vector<std::string> &nodes
 
 void redox::cluster_bata::Cluster::disconnect()
 {
-    util::WriterGuard guard(m_nodes_lock);
-    for (auto node: m_nodes)
-    {
-        if (nullptr == node)
-        {
-            continue;
-        }
-    }
-    m_nodes.clear();
+    // Signal the event loop to process this event
+    ev_async_send(m_evloop, &m_watcher_disconnection);
 }
 
 void redox::cluster_bata::Cluster::start()
@@ -205,19 +226,6 @@ void redox::cluster_bata::Cluster::wait()
     m_exit_waiter.wait(ul, [this] {return m_exited;});
 }
 
-//bool redox::cluster_::Cluster::reflashRouteSelf(std::function<void (int)> connection_callback)
-//{
-//    for (auto node : m_nodes)
-//    {
-//        if (reflashRoute(node->m_ctx, connection_callback))
-//        {
-//            return true;
-//        }
-//    }
-
-//    return false;
-//}
-
 bool redox::cluster_bata::Cluster::connectNodes(const std::string &cluster_nodes/*redisAsyncContext *ctx*/, std::function<void (int)> connection_callback)
 {
     // if libev event loop not init, must init libe
@@ -240,7 +248,7 @@ bool redox::cluster_bata::Cluster::connectNodes(const std::string &cluster_nodes
         std::vector<std::string> infos;
         util::split(node, infos, " ");
 
-        std::shared_ptr<ClusterNode> n = std::make_shared<ClusterNode>(this);
+        std::shared_ptr<Channel> n = std::make_shared<Channel>(this);
         if (nullptr == n)
         {
             m_logger.warning() << "create cluster node connector failed, make_shared<ClusterNode> => nullptr, node info '"<< node << "'";
@@ -249,6 +257,8 @@ bool redox::cluster_bata::Cluster::connectNodes(const std::string &cluster_nodes
 
         // node init failed?
         if (!n->init(infos, connection_callback)) continue;
+
+        if (!n->connect()) continue;
 
         // set note to ev loop failed?
         if (!initClusterNode(n.get())) continue;
@@ -261,7 +271,7 @@ bool redox::cluster_bata::Cluster::connectNodes(const std::string &cluster_nodes
         n->waitConnected();
 
         // it's ok!!
-        if (n->getConnectState() != ClusterNode::EN_CONNECTED)
+        if (n->getConnectState() != Channel::EN_CONNECTED)
             continue;
         else
             cluster_node.push_back(n);
@@ -333,69 +343,109 @@ bool redox::cluster_bata::Cluster::isClusterOk(redox::Redox &rdx)
 
 int redox::cluster_bata::Cluster::ok()
 {
-    // 获取最新的节点信息，并将节点信息与当前的集群信息进行比对，更新节点状态
+
     util::ReaderGuard guard(m_nodes_lock);
+
+    // 获取最新的节点信息，并将节点信息与当前的集群信息进行比对，更新节点状态
+    std::shared_ptr<Channel> self_node;
     for(auto n: m_nodes) {
         // 在self节点获取集群的节点信息，并与当前的节点信息进行比对
-        if (ClusterNode::myself == (n->m_flag & ClusterNode::myself)) {
-
+        if (Channel::myself == (n->m_flag & Channel::myself)) {
+            self_node = n;
         }
     }
-    // 检查所有节点状态
+
+    if (nullptr == self_node) return EN_NO_OK;
+
+    // 通过self节点，执行cluster node, 获取各个节点，检查节点状态是否有变化
+
+    // 通过ping/pang检查节点通讯
     // 如果是slave则检查的是read状态
+
     // 如果是master则检查的是write状态
+
     // 返回最后的处理结果
+
     return EN_NO_OK;
 }
 
-void redox::cluster_bata::Cluster::connectedCallback(const redisAsyncContext *c, int status)
+bool redox::cluster_bata::Cluster::isNeedRefresh()
 {
-    ClusterNode *node = (ClusterNode*) c->data;
+    return false;
+}
+
+void redox::cluster_bata::Cluster::channelConnectedCallback(const redisAsyncContext *c, int status) {
+    Channel *node = (Channel*) c->data;
     Cluster *cluster = node->m_cluster;
 
     if (status != REDIS_OK) {
         cluster->m_logger.fatal() << "Could not connect to Redis cluster node: (" << node->m_client_host << ":" << node->m_client_port << ") error: "<< c->errstr;
         cluster->m_logger.fatal() << "Status: " << status;
-        node->setConnectState(ClusterNode::EN_CONNECT_ERROR);
+        node->setConnectState(Channel::EN_CONNECT_ERROR);
+        node->m_ctx = nullptr;
 
     } else {
         cluster->m_logger.info() << "Connected to Redis cluster node: (" << node->m_client_host << ":" << node->m_client_port << ")";
         // Disable hiredis automatically freeing reply objects
         c->c.reader->fn->freeObject = [](void *reply) {};
-        node->setConnectState(ClusterNode::EN_CONNECTED);
+        node->setConnectState(Channel::EN_CONNECTED);
     }
 }
 
-void redox::cluster_bata::Cluster::disconnectedCallback(const redisAsyncContext *c, int status)
-{
-    ClusterNode *node = (ClusterNode*) c->data;
+void redox::cluster_bata::Cluster::channelDisconnectedCallback(const redisAsyncContext *c, int status) {
+    Channel *node = (Channel*) c->data;
     Cluster *cluster = node->m_cluster;
 
     if (status != REDIS_OK) {
         cluster->m_logger.error() << "Disconnected from Redis on error, cluster node: (" << node->m_client_host << ":" << node->m_client_port << ") error: "<< c->errstr;
-        node->setConnectState(ClusterNode::EN_DISCONNECT_ERROR);
+        node->setConnectState(Channel::EN_DISCONNECT_ERROR);
     } else {
         cluster->m_logger.info() << "Disconnected from Redis as planned.";
-        node->setConnectState(ClusterNode::EN_DISCONNECTED);
+        node->setConnectState(Channel::EN_DISCONNECTED);
     }
+    // 移除管理关联的上下文，hiredis内部会释放该信息
+    node->m_ctx = nullptr;
 
-    // TODO: cluster stop
-    // rdx->stop();
+    // 移除节点
+    util::WriterGuard lock(cluster->m_nodes_lock);
+    for (TClusterNodes::iterator iter = cluster->m_nodes.begin();
+         iter != cluster->m_nodes.end();
+         )
+    {
+        if ((*iter).get() == node)
+        {
+            iter = cluster->m_nodes.erase(iter);
+        }
+        else
+        {
+            ++iter;
+        }
+    }
 }
 
-void redox::cluster_bata::Cluster::asyncFreeCallback(const redisAsyncContext *c, int id)
+void redox::cluster_bata::Cluster::asyncFreeCallback(int id)
 {
-    ClusterNode *node = (ClusterNode*) c->data;
-    Cluster *cluster = node->m_cluster;
-
-    std::lock_guard<std::mutex> lg(cluster->m_free_queue_guard);
-    cluster->m_commands_to_free.push(id);
-    ev_async_send(cluster->m_evloop, &cluster->m_watcher_free);
+    std::lock_guard<std::mutex> lg(this->m_free_queue_lock);
+    this->m_commands_to_free.push(id);
+    ev_async_send(this->m_evloop, &this->m_watcher_free);
 }
 
 void redox::cluster_bata::Cluster::breakEventLoop(struct ev_loop *loop, ev_async *async, int revents)
 {
     ev_break(loop, EVBREAK_ALL);
+}
+
+bool redox::cluster_bata::Cluster::getRunning() {
+    std::lock_guard<std::mutex> lg(m_running_lock);
+    return m_running;
+}
+
+void redox::cluster_bata::Cluster::setRunning(bool running) {
+    {
+        std::lock_guard<std::mutex> lg(m_running_lock);
+        m_running = running;
+    }
+    m_running_waiter.notify_one();
 }
 
 void redox::cluster_bata::Cluster::runEventLoop()
@@ -467,14 +517,23 @@ void redox::cluster_bata::Cluster::processConnection(struct ev_loop *loop, ev_as
 
 void redox::cluster_bata::Cluster::processDisconnection(struct ev_loop *loop, ev_async *async, int revents)
 {
-
+    Cluster *cluster = (Cluster *)ev_userdata(loop);
+    util::WriterGuard guard(cluster->m_nodes_lock);
+    for (auto node: cluster->m_nodes)
+    {
+        if (nullptr == node)
+        {
+            continue;
+        }
+    }
+    cluster->m_nodes.clear();
 }
 
 void redox::cluster_bata::Cluster::processQueuedCommands(struct ev_loop *loop, ev_async *async, int revents)
 {
     Cluster *cluster = (Cluster *)ev_userdata(loop);
 
-    std::lock_guard<std::mutex> lg(cluster->m_queue_guard);
+    std::lock_guard<std::mutex> lg(cluster->m_queue_lock);
 
     while (!cluster->m_command_queue.empty()) {
 
@@ -497,20 +556,82 @@ void redox::cluster_bata::Cluster::processQueuedCommands(struct ev_loop *loop, e
     }
 }
 
-uint32_t redox::cluster_bata::Cluster::findNodeBySlot(uint32_t slot)
+void redox::cluster_bata::Cluster::freeQueuedCommands(struct ev_loop *loop, ev_async *async, int revents)
+{
+    Cluster *rdx = (Cluster *)ev_userdata(loop);
+
+    std::lock_guard<std::mutex> lg(rdx->m_free_queue_lock);
+
+    while (!rdx->m_commands_to_free.empty()) {
+        long id = rdx->m_commands_to_free.front();
+        rdx->m_commands_to_free.pop();
+
+        if (rdx->freeQueuedCommand<redisReply *>(id)) {
+        } else if (rdx->freeQueuedCommand<std::string>(id)) {
+        } else if (rdx->freeQueuedCommand<char *>(id)) {
+        } else if (rdx->freeQueuedCommand<int>(id)) {
+        } else if (rdx->freeQueuedCommand<long long int>(id)) {
+        } else if (rdx->freeQueuedCommand<std::nullptr_t>(id)) {
+        } else if (rdx->freeQueuedCommand<std::vector<std::string>>(id)) {
+        } else if (rdx->freeQueuedCommand<std::set<std::string>>(id)) {
+        } else if (rdx->freeQueuedCommand<std::unordered_set<std::string>>(id)) {
+        } else {
+        }
+    }
+}
+
+long redox::cluster_bata::Cluster::freeAllCommands()
+{
+    return freeAllCommandsOfType<redisReply *>()
+            + freeAllCommandsOfType<std::string>()
+            + freeAllCommandsOfType<char *>()
+            + freeAllCommandsOfType<int>()
+            + freeAllCommandsOfType<long long int>()
+            + freeAllCommandsOfType<std::nullptr_t>()
+            + freeAllCommandsOfType<std::vector<std::string> >()
+            + freeAllCommandsOfType<std::set<std::string> >()
+            + freeAllCommandsOfType<std::unordered_set<std::string> >();
+}
+
+void redox::cluster_bata::Cluster::debug_ping()
+{
+    auto f = [&](Command<std::string> & c) -> void {
+        if(c.ok()) {
+            m_logger.info() << "ping reply: " << c.reply();
+        } else {
+            m_logger.error() << "Command ping has error code " << c.status();
+        }
+    };
+
+    for(auto n: m_nodes) {
+        m_logger.debug() << "ping (" << n->m_client_host << ": " << n->m_client_port <<")";
+        if (!commandSyncOn<std::string>(n, {"ping"}, f))
+        {
+            m_logger.error() << "exec command ping failed!!!";
+        }
+    }
+}
+
+std::shared_ptr<redox::cluster_bata::Channel> redox::cluster_bata::Cluster::findNodeBySlot(uint32_t slot)
 {
     uint32_t node_id = 0;
+    std::shared_ptr<Channel> node_ptr;
     for (TClusterNodes::iterator iter = m_nodes.begin(); iter != m_nodes.end(); ++iter)
     {
         const TClusterNodes::value_type &client = *iter;
+        // 只在主节点中执行命令
+        if (Channel::master != (client->m_flag & Channel::master))
+        {
+            continue;
+        }
         if (slot >= client->m_slots.first && slot <= client->m_slots.second)
         {
+            node_ptr = client;
             break;
         }
-        ++node_id;
     }
 
-    return node_id;
+    return node_ptr;
 }
 
 bool redox::cluster_bata::Cluster::initEv()
@@ -525,7 +646,7 @@ bool redox::cluster_bata::Cluster::initEv()
     return true;
 }
 
-bool redox::cluster_bata::Cluster::initClusterNode(redox::cluster_bata::ClusterNode *node)
+bool redox::cluster_bata::Cluster::initClusterNode(redox::cluster_bata::Channel *node)
 {
     if (nullptr == node)
         return false;
@@ -535,27 +656,27 @@ bool redox::cluster_bata::Cluster::initClusterNode(redox::cluster_bata::ClusterN
 
     if (ctx->err) {
         m_logger.fatal() << "Could not create a hiredis context: " << ctx->errstr;
-        node->setConnectState(ClusterNode::EN_INIT_ERROR);
+        node->setConnectState(Channel::EN_INIT_ERROR);
         return false;
     }
 
     // Attach event loop to hiredis
     if (redisLibevAttach(m_evloop, ctx) != REDIS_OK) {
         m_logger.fatal() << "Could not attach libev event loop to hiredis.";
-        node->setConnectState(ClusterNode::EN_INIT_ERROR);
+        node->setConnectState(Channel::EN_INIT_ERROR);
         return false;
     }
 
     // Set the callbacks to be invoked on server connection/disconnection
-    if (redisAsyncSetConnectCallback(ctx, Cluster::connectedCallback) != REDIS_OK) {
+    if (redisAsyncSetConnectCallback(ctx, Cluster::channelConnectedCallback) != REDIS_OK) {
         m_logger.fatal() << "Could not attach connect callback to hiredis.";
-        node->setConnectState(ClusterNode::EN_INIT_ERROR);
+        node->setConnectState(Channel::EN_INIT_ERROR);
         return false;
     }
 
-    if (redisAsyncSetDisconnectCallback(ctx, Cluster::disconnectedCallback) != REDIS_OK) {
+    if (redisAsyncSetDisconnectCallback(ctx, Cluster::channelDisconnectedCallback) != REDIS_OK) {
         m_logger.fatal() << "Could not attach disconnect callback to hiredis.";
-        node->setConnectState(ClusterNode::EN_INIT_ERROR);
+        node->setConnectState(Channel::EN_INIT_ERROR);
         return false;
     }
 

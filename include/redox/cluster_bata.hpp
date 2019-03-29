@@ -13,6 +13,7 @@
 #include <string>
 #include <queue>
 #include <set>
+#include <list>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -56,9 +57,9 @@ void redox_ev_timer_init(ttimer timer, tcb cb, tafter after, trepeat repeat)
 class Cluster;
 
 /**
- * @brief The ClusterNode struct  集群节点信息
+ * @brief The Channel struct  cluster 客户端与与集群节点的通道
  */
-struct ClusterNode
+struct Channel
 {
     // Connection states
     enum EConnectionStates{
@@ -85,11 +86,8 @@ struct ClusterNode
         noflags     = 0                     // No flags at all.
     };
 
-    ClusterNode(Cluster *from):
-        m_cluster(from), m_ctx(nullptr),
-        m_id(), m_client_host(), m_client_port(), m_flag(0), m_master_id(), m_link_state(), m_slots(),
-        m_connect_state(EN_NOT_YET_CONNECTED)
-    {}
+    Channel(Cluster *from);
+    virtual ~Channel();
 
     /**
      * @brief init 初始化集群节点信息
@@ -103,6 +101,17 @@ struct ClusterNode
      * @brief fini 对象释放
      */
     void fini();
+
+    /**
+     * @brief connect 建立异步链接
+     * @return true/false
+     */
+    bool connect();
+
+    /**
+     * @brief disconnect 断开链接
+     */
+    void disconnect();
 
     /**
      * @brief getConnectState 获取当前连接状态
@@ -155,12 +164,13 @@ struct ClusterNode
     std::condition_variable m_connect_waiter;
 };
 
-typedef std::vector<std::shared_ptr<ClusterNode>> TClusterNodes;
+typedef std::list<std::shared_ptr<Channel>> TClusterNodes;
 
 /**
  * @brief The Cluster class 集群客户端
  */
-class Cluster {
+class Cluster
+{
 public:
     Cluster(std::ostream &log_stream = std::cout, log::Level log_level = log::Debug);
     ~Cluster();
@@ -236,13 +246,6 @@ public:
     void wait();
 
     /**
-     * @brief reflashRouteSelf 根据现有连接信息，刷新路由信息
-     * @param connection_callback 连接错误处理函数
-     * @return true/false 连接结果
-     */
-    //bool reflashRouteSelf(std::function<void(int)> connection_callback = nullptr);
-
-    /**
      * @brief connectNodes 连接到集群节点
      * @return
      */
@@ -287,27 +290,52 @@ public:
      */
     int ok();
 
+    /**
+     * @brief is_need_refresh 是否需要重新刷新节点信息
+     * @return true/false
+     */
+    bool isNeedRefresh();
+
     // Callbacks invoked on server connection/disconnection
-    static void connectedCallback(const redisAsyncContext *c, int status);
-    static void disconnectedCallback(const redisAsyncContext *c, int status);
+    static void channelConnectedCallback(const redisAsyncContext *c, int status);
+    static void channelDisconnectedCallback(const redisAsyncContext *c, int status);
+
+    /**
+     * handle the error replay
+     */
+    template <class ReplyT> void parseReplyError(Command<ReplyT> &c, int error) {
+        // TODO: redis reply失败的情况进行处理
+    }
 
     /**
      * @brief asyncFreeCallback 调用Command类的free接口，会执行该回掉函数
      * @param c 异步redis对象指针
      * @param id 命令id
      */
-    static void asyncFreeCallback(const redisAsyncContext *c, int id);
+    void asyncFreeCallback(int id);
 
-    // Return the command map corresponding to the templated reply type
-    template <class ReplyT>
-    std::unordered_map<long, Command<ReplyT> *> &getCommandMap();
+    /**
+     * @brief getCommandMap Return the command map corresponding to the templated reply type
+     * @note 实现了较多的特例化接口
+     */
+    template <class ReplyT> std::unordered_map<long, Command<ReplyT> *> &getCommandMap();
 
-    template <class ReplyT>
-    Command<ReplyT> *createCommand(
+    /**
+     * @brief createCommand 创建代执行命令
+     * @param ctx
+     * @param cmd 命令内容
+     * @param callback 结果处理回调
+     * @param repeat 重复次数
+     * @param after 延迟时间
+     * @param free_memory 是否需要释放内存
+     * @return 待处理命令
+     */
+    template <class ReplyT> Command<ReplyT> *createCommand(
             redisAsyncContext *ctx,
             const std::vector<std::string> &cmd,
             const std::function<void(Command<ReplyT> &)> &callback = nullptr,
             double repeat = 0.0, double after = 0.0, bool free_memory = true) {
+
         {
             std::unique_lock<std::mutex> ul(m_running_lock);
             if (!m_running) {
@@ -317,14 +345,26 @@ public:
             }
         }
 
-        auto c = Command<ReplyT>::createCommand(ctx, m_commands_created.fetch_add(1), cmd,
-                                                callback,
-                                                std::bind(Cluster::disconnectedCallback, std::placeholders::_1, std::placeholders::_2),
-                                                std::bind(Cluster::asyncFreeCallback, std::placeholders::_1, std::placeholders::_2),
-                                                repeat, after, free_memory, m_logger);
+        auto c = Command<ReplyT>::createCommand(
+                    ctx,
+                    m_commands_created.fetch_add(1),
+                    cmd,
+                    callback,
+                    std::bind(&Cluster::parseReplyError<ReplyT>, this, std::placeholders::_1, std::placeholders::_2),
+                    std::bind(&Cluster::asyncFreeCallback, this, std::placeholders::_1),
+                    repeat,
+                    after,
+                    free_memory,
+                    m_logger);
 
-        std::lock_guard<std::mutex> lg(m_queue_guard);
-        std::lock_guard<std::mutex> lg2(m_command_map_guard);
+        if (nullptr == c)
+        {
+            m_logger.error() << "create redis command failed!!!";
+            return nullptr;
+        }
+
+        std::lock_guard<std::mutex> lg1(m_queue_lock);
+        std::lock_guard<std::mutex> lg2(m_command_map_lock);
 
         /* debug
         if (!getCommandMap<ReplyT>().insert({c->id_, c}).second)
@@ -357,24 +397,13 @@ public:
      * @brief getRunning 获取事件环运行标记
      * @return
      */
-    bool getRunning()
-    {
-        std::lock_guard<std::mutex> lg(m_running_lock);
-        return m_running;
-    }
+    bool getRunning();
 
     /**
      * @brief setRunning 设置事件环运行标记
      * @param running
      */
-    void setRunning(bool running)
-    {
-        {
-            std::lock_guard<std::mutex> lg(m_running_lock);
-            m_running = running;
-        }
-        m_running_waiter.notify_one();
-    }
+    void setRunning(bool running);
 
     /**
      * @brief getExited 检查事件环是否推出
@@ -425,7 +454,7 @@ public:
      */
     template <class ReplyT> Command<ReplyT> *findCommand(long id)
     {
-        std::lock_guard<std::mutex> lg(m_command_map_guard);
+        std::lock_guard<std::mutex> lg(m_command_map_lock);
 
         auto &command_map = getCommandMap<ReplyT>();
         auto it = command_map.find(id);
@@ -493,8 +522,8 @@ public:
      */
     template <class ReplyT> static bool submitToServer(Command<ReplyT> *c)
     {
-        redisAsyncContext *ctx = c->ctx_;
-        Cluster *cluster = ((ClusterNode *)ctx->data)->m_cluster;
+        redisAsyncContext *ctx = (redisAsyncContext *)c->handle_;
+        Cluster *cluster = ((Channel *)ctx->data)->m_cluster;
         c->pending_++;
 
         // Construct a char** from the vector
@@ -525,7 +554,7 @@ public:
     template <class ReplyT>
     static void commandCallback(redisAsyncContext *ctx, void *r, void *privdata)
     {
-        ClusterNode *node = (ClusterNode *)ctx->data;
+        Channel *node = (Channel *)ctx->data;
         Cluster *cluster = node->m_cluster;
         long id = (long)privdata;
         redisReply *reply_obj = (redisReply *)r;
@@ -537,7 +566,7 @@ public:
             return;
         }
 
-        // TODO: 需要对moved的操作进行处理，重新执行该命令
+        // 需要对moved的操作进行处理，重新执行该命令
         auto move_to_other = [cluster, node, c](const std::string &host, int32_t port) {
             util::ReaderGuard guard(cluster->m_nodes_lock);
             for (auto n: cluster->m_nodes) {
@@ -547,10 +576,10 @@ public:
                                                << ") moved to node ("
                                                << n->m_client_host << ":" << n->m_client_port
                                                << ")";
-                    c->ctx_ = n->m_ctx;
+                    c->handle_ = n->m_ctx;
                     ++ c->pending_;
                     // 重新提交到事件环中
-                    std::lock_guard<std::mutex> lg(cluster->m_queue_guard);
+                    std::lock_guard<std::mutex> lg(cluster->m_queue_lock);
                     cluster->m_command_queue.push(c->id_);
 
                     // Signal the event loop to process this command
@@ -569,29 +598,7 @@ public:
      * @param async
      * @param revents
      */
-    static void freeQueuedCommands(struct ev_loop *loop, ev_async *async, int revents)
-    {
-        Cluster *rdx = (Cluster *)ev_userdata(loop);
-
-        std::lock_guard<std::mutex> lg(rdx->m_free_queue_guard);
-
-        while (!rdx->m_commands_to_free.empty()) {
-            long id = rdx->m_commands_to_free.front();
-            rdx->m_commands_to_free.pop();
-
-            if (rdx->freeQueuedCommand<redisReply *>(id)) {
-            } else if (rdx->freeQueuedCommand<std::string>(id)) {
-            } else if (rdx->freeQueuedCommand<char *>(id)) {
-            } else if (rdx->freeQueuedCommand<int>(id)) {
-            } else if (rdx->freeQueuedCommand<long long int>(id)) {
-            } else if (rdx->freeQueuedCommand<std::nullptr_t>(id)) {
-            } else if (rdx->freeQueuedCommand<std::vector<std::string>>(id)) {
-            } else if (rdx->freeQueuedCommand<std::set<std::string>>(id)) {
-            } else if (rdx->freeQueuedCommand<std::unordered_set<std::string>>(id)) {
-            } else {
-            }
-        }
-    }
+    static void freeQueuedCommands(struct ev_loop *loop, ev_async *async, int revents);
 
     /**
      * Free the command with the given ID. Return true if the command had the templated
@@ -608,8 +615,9 @@ public:
         // Stop the libev timer if this is a repeating command
         if ((c->repeat_ != 0) || (c->after_ != 0)) {
             std::lock_guard<std::mutex> lg(c->timer_guard_);
-            Cluster *node = ((ClusterNode *)c->ctx_->data)->m_cluster;
-            ev_timer_stop(node->m_evloop, &c->timer_);
+            redisAsyncContext *ctx = (redisAsyncContext *)c->handle_;
+            Cluster *cluster = ((Channel *)ctx->data)->m_cluster;
+            ev_timer_stop(cluster->m_evloop, &c->timer_);
         }
 
         deregisterCommand<ReplyT>(c->id_);
@@ -620,11 +628,11 @@ public:
     }
 
     /**
-     * Invoked by Command objects when they are completed. Removes them from the command map.
+     * @brief Invoked by Command objects when they are completed. Removes them from the command map.
      */
     template <class ReplyT> void deregisterCommand(const long id)
     {
-        std::lock_guard<std::mutex> lg1(m_command_map_guard);
+        std::lock_guard<std::mutex> lg1(m_command_map_lock);
         /* debug
         if (getCommandMap<ReplyT>().find(id) == getCommandMap<ReplyT>().end())
             m_logger.warning() << "id:" << id << " not in command map";
@@ -637,27 +645,16 @@ public:
      * @brief freeAllCommands Free all commands remaining in the command maps
      * @return
      */
-    long freeAllCommands()
-    {
-        return freeAllCommandsOfType<redisReply *>()
-                + freeAllCommandsOfType<std::string>()
-                + freeAllCommandsOfType<char *>()
-                + freeAllCommandsOfType<int>()
-                + freeAllCommandsOfType<long long int>()
-                + freeAllCommandsOfType<std::nullptr_t>()
-                + freeAllCommandsOfType<std::vector<std::string> >()
-                + freeAllCommandsOfType<std::set<std::string> >()
-                + freeAllCommandsOfType<std::unordered_set<std::string> >();
-    }
+    long freeAllCommands();
 
     /**
      * Helper function for freeAllCommands to access a specific command map
      */
     template <class ReplyT> long freeAllCommandsOfType()
     {
-        std::lock_guard<std::mutex> lg(m_free_queue_guard);
-        std::lock_guard<std::mutex> lg2(m_queue_guard);
-        std::lock_guard<std::mutex> lg3(m_command_map_guard);
+        std::lock_guard<std::mutex> lg(m_free_queue_lock);
+        std::lock_guard<std::mutex> lg2(m_queue_lock);
+        std::lock_guard<std::mutex> lg3(m_command_map_lock);
 
         auto &command_map = getCommandMap<ReplyT>();
         long len = command_map.size();
@@ -670,7 +667,8 @@ public:
             // Stop the libev timer if this is a repeating command
             if ((c->repeat_ != 0) || (c->after_ != 0)) {
                 std::lock_guard<std::mutex> lg3(c->timer_guard_);
-                Cluster *cluster = ((ClusterNode *)c->ctx_->data)->m_cluster;
+                redisAsyncContext *ctx = (redisAsyncContext *)c->handle_;
+                Cluster *cluster = ((Channel *)ctx->data)->m_cluster;
                 ev_timer_stop(cluster->m_evloop, &c->timer_);
             }
 
@@ -688,30 +686,32 @@ public:
      * @param cmdline 命令
      * @param callback 结果处理函数
      */
-    template<typename ReplyT>
-    void command(const std::vector<std::string> &cmdline,
-                 const std::function<void(Command<ReplyT>&)> &callback = nullptr)
+    template<typename ReplyT> void command(const std::vector<std::string> &cmdline,
+                                           const std::function<void(Command<ReplyT>&)> &callback = nullptr)
     {
         std::string key = cmdline[1];
-        uint32_t slot = util::hash_slot(key.c_str(), key.length());
-        uint32_t node_index = this->findNodeBySlot(slot);
 
+        // TODO: findNodeBySlot转移到ev_loop内执行
         util::ReaderGuard guard(m_nodes_lock);
-        if (node_index >= m_nodes.size())
+        std::shared_ptr<Channel> node = nullptr;
+        if (cmdline.size() > 1)
         {
-            m_logger.error() << "key: " << key << ", "
-                             << "slot:" << slot << ", "
-                             << "node index:" << node_index << ", "
-                             << "node size:"  << m_nodes.size();
-            return ;
+            std::string key = cmdline[1];
+            uint32_t slot = util::hash_slot(key.c_str(), key.length());
+            node = this->findNodeBySlot(slot);
+        }
+        else
+        {
+            if (!m_nodes.empty())
+                node = m_nodes.front();
         }
 
-        std::shared_ptr<ClusterNode> node = m_nodes[node_index];
         if (node == nullptr)
         {
-            m_logger.error() << "cluster node id: " << node_index << " is nullptr";
+            m_logger.error() << "cluster node is nullptr";
             return ;
         }
+
         createCommand<ReplyT>(node->m_ctx, cmdline, callback);
     }
 
@@ -719,33 +719,30 @@ public:
      * @brief commandSync 同步执行命令
      * @param cmdline 命令
      */
-    template<typename ReplyT>
-    bool commandSync(const std::vector<std::string> &cmdline,
-                     const std::function<void(Command<ReplyT>&)> &callback = nullptr)
+    template<typename ReplyT> bool commandSync(const std::vector<std::string> &cmdline,
+                                               const std::function<void(Command<ReplyT>&)> &callback = nullptr)
     {
-        uint32_t node_index = 0;
+        // TODO: findNodeBySlot转移到ev_loop内执行
         util::ReaderGuard guard(m_nodes_lock);
+        std::shared_ptr<Channel> node = nullptr;
         if (cmdline.size() > 1)
         {
             std::string key = cmdline[1];
             uint32_t slot = util::hash_slot(key.c_str(), key.length());
-            node_index = this->findNodeBySlot(slot);
-
-            if (node_index >= m_nodes.size())
-            {
-                m_logger.error() << "key: " << key << ", "
-                                 << "slot:" << slot << ", "
-                                 << "node index:" << node_index << ", "
-                                 << "node size:"  << m_nodes.size();
-                 return false;
-            }
+            node = this->findNodeBySlot(slot);
+        }
+        else
+        {
+            if (!m_nodes.empty())
+                node = m_nodes.front();
         }
 
-        std::shared_ptr<ClusterNode> node = m_nodes[node_index];
         if (node == nullptr)
         {
+            m_logger.error() << "cluster node is nullptr";
             return false;
         }
+
         auto c = createCommand<ReplyT>(node->m_ctx, cmdline, nullptr, 0, 0, false);
         if (nullptr == c) return false;
 
@@ -770,15 +767,12 @@ public:
      *          very similarly to what happens with keys (so ARGV[1], ARGV[2], ...).
      * @param callback, define a function that process the result.
      */
-    template<typename ReplyT>
-    void eval(const char *script,
-              const std::vector<std::string> &keys = {},
-              const std::vector<std::string> &args = {},
-              const std::function<void(Command<ReplyT>&)> &callback = nullptr) {
+    template<typename ReplyT> void eval(const char *script,
+                                        const std::vector<std::string> &keys = {},
+                                        const std::vector<std::string> &args = {},
+                                        const std::function<void(Command<ReplyT>&)> &callback = nullptr) {
 
-        std::string key = util::join(keys.begin(), keys.end(), std::string("_"));
-        uint32_t slot = util::hash_slot(key.c_str(), key.length());
-        uint32_t node_index = this->findNodeBySlot(slot);
+
 
         std::vector<std::string> cmdline = {"eval", script};
         cmdline.push_back(std::to_string(keys.size()));
@@ -790,15 +784,26 @@ public:
             cmdline.push_back(*iter);
         }
 
+        // TODO: findNodeBySlot转移到ev_loop内执行
         util::ReaderGuard guard(m_nodes_lock);
-        if (node_index >= m_nodes.size()) {
-            m_logger.error() << "key: " << key << ", " << "slot:" << slot << ", "
-                             << "node index:" << node_index << ", " << "node size:"  << m_nodes.size();
-            return ;
+        std::shared_ptr<Channel> node = nullptr;
+        if (cmdline.size() > 1)
+        {
+            std::string key = cmdline[1];
+            uint32_t slot = util::hash_slot(key.c_str(), key.length());
+            node = this->findNodeBySlot(slot);
+        }
+        else
+        {
+            if (!m_nodes.empty())
+                node = m_nodes.front();
         }
 
-        std::shared_ptr<ClusterNode> node = m_nodes[node_index];
-        if (node == nullptr) { return ; }
+        if (node == nullptr)
+        {
+            m_logger.error() << "cluster node is nullptr";
+            return ;
+        }
 
         createCommand<ReplyT>(node->m_ctx, cmdline);
     }
@@ -814,14 +819,11 @@ public:
      *          very similarly to what happens with keys (so ARGV[1], ARGV[2], ...).
      * @return redis return
      */
-    template<typename ReplyT>
-    bool evalSync(const char *script,
-                  const std::vector<std::string> &keys = {},
-                  const std::vector<std::string> &args = {},
-                  const std::function<void(Command<ReplyT>&)> &callback = nullptr) {
-        std::string key = util::join(keys.begin(), keys.end(), std::string("_"));
-        uint32_t slot = util::hash_slot(key.c_str(), key.length());
-        uint32_t node_index = this->findNodeBySlot(slot);
+    template<typename ReplyT> bool evalSync(const char *script,
+                                            const std::vector<std::string> &keys = {},
+                                            const std::vector<std::string> &args = {},
+                                            const std::function<void(Command<ReplyT>&)> &callback = nullptr) {
+
 
         std::vector<std::string> cmdline = {"eval", script};
         cmdline.push_back(std::to_string(keys.size()));
@@ -833,17 +835,27 @@ public:
             cmdline.push_back(*iter);
         }
 
+        // TODO: findNodeBySlot转移到ev_loop内执行
         util::ReaderGuard guard(m_nodes_lock);
-        if (node_index >= m_nodes.size()) {
-            m_logger.error() << "key: " << key << ", " << "slot:" << slot << ", "
-                             << "node index:" << node_index << ", " << "node size:"  << m_nodes.size();
+        std::shared_ptr<Channel> node = nullptr;
+        if (cmdline.size() > 1)
+        {
+            std::string key = cmdline[1];
+            uint32_t slot = util::hash_slot(key.c_str(), key.length());
+            node = this->findNodeBySlot(slot);
+        }
+        else
+        {
+            if (!m_nodes.empty())
+                node = m_nodes.front();
+        }
+
+        if (node == nullptr)
+        {
+            m_logger.error() << "cluster node is nullptr";
             return false;
         }
 
-        std::shared_ptr<ClusterNode> node = m_nodes[node_index];
-        if (node == nullptr) {
-            return false;
-        }
 
         Command<ReplyT> &c = commandSync<ReplyT>(cmdline);
         bool successed = c.ok();
@@ -854,13 +866,53 @@ public:
         return successed;
     }
 
+    template<typename ReplyT> void commandOn(std::shared_ptr<Channel> channel,
+                                             const std::vector<std::string> &cmdline,
+                                             const std::function<void(Command<ReplyT>&)> &callback = nullptr)
+    {
+
+        if (channel == nullptr)
+        {
+            std::string cmd = util::join(cmdline.begin(), cmdline.end(), std::string(""));
+            m_logger.error() << "fource on cluster node exec command failed, channel ptr is nullptr, command: " << cmd;
+            return;
+        }
+        createCommand<ReplyT>(channel->m_ctx, cmdline, callback);
+    }
+
+    template<typename ReplyT> bool commandSyncOn(std::shared_ptr<Channel> channel,
+                                                 const std::vector<std::string> &cmdline,
+                                                 const std::function<void(Command<ReplyT>&)> &callback = nullptr)
+    {
+        if (channel == nullptr)
+        {
+            return false;
+        }
+        auto c = createCommand<ReplyT>(channel->m_ctx, cmdline, nullptr, 0, 0, false);
+        if (nullptr == c) return false;
+
+        c->wait();
+        bool successed = c->ok();
+
+        if (callback) {
+            callback(*c);
+        }
+        c->free();
+        return successed;
+    }
+
+    /**
+     * @brief debug_ping
+     */
+    void debug_ping();
+
 private:
     /**
      * @brief findNodeBySlot 根据solt，计算出需要在那个节点执行命令
      * @param slot
      * @return 节点的索引
      */
-    uint32_t findNodeBySlot(uint32_t slot);
+    std::shared_ptr<Channel> findNodeBySlot(uint32_t slot);
 
     /**
      * @brief initEv 初始化evloop
@@ -872,7 +924,7 @@ private:
      * @brief initClusterNode 绑定cluster node到evloop中
      * @return true/false
      */
-    bool initClusterNode(ClusterNode* node);
+    bool initClusterNode(Channel* node);
 
 private:
     // 集群节点
@@ -940,17 +992,17 @@ private:
     std::unordered_map<long, Command<std::vector<std::string>> *> m_commands_vector_string;
     std::unordered_map<long, Command<std::set<std::string>> *> m_commands_set_string;
     std::unordered_map<long, Command<std::unordered_set<std::string>> *> m_commands_unordered_set_string;
-    std::mutex m_command_map_guard; // Guards access to all of the above
+    std::mutex m_command_map_lock; // Guards access to all of the above
 
     // Command IDs pending to be sent to the server
     std::queue<int64_t> m_command_queue;
-    std::mutex m_queue_guard;
+    std::mutex m_queue_lock;
 
     // Commands IDs pending to be freed by the event loop
     std::queue<int64_t> m_commands_to_free;
-    std::mutex m_free_queue_guard;
+    std::mutex m_free_queue_lock;
 
-    friend struct ClusterNode;
+    friend struct Channel;
 };
 
 }}
