@@ -336,13 +336,11 @@ public:
             const std::function<void(Command<ReplyT> &)> &callback = nullptr,
             double repeat = 0.0, double after = 0.0, bool free_memory = true) {
 
-        {
-            std::unique_lock<std::mutex> ul(m_running_lock);
-            if (!m_running) {
-                // throw std::runtime_error("[ERROR] Need to connect Redox before running commands!");
-                m_logger.error() << "Need to connect Redox before running commands!";
-                return nullptr;
-            }
+        std::unique_lock<std::mutex> ul(m_running_lock);
+        if (!m_running) {
+            // throw std::runtime_error("[ERROR] Need to connect Redox before running commands!");
+            m_logger.error() << "Need to connect Redox before running commands!";
+            return nullptr;
         }
 
         auto c = Command<ReplyT>::createCommand(
@@ -652,7 +650,7 @@ public:
      */
     template <class ReplyT> long freeAllCommandsOfType()
     {
-        std::lock_guard<std::mutex> lg(m_free_queue_lock);
+        std::lock_guard<std::mutex> lg1(m_free_queue_lock);
         std::lock_guard<std::mutex> lg2(m_queue_lock);
         std::lock_guard<std::mutex> lg3(m_command_map_lock);
 
@@ -666,7 +664,7 @@ public:
 
             // Stop the libev timer if this is a repeating command
             if ((c->repeat_ != 0) || (c->after_ != 0)) {
-                std::lock_guard<std::mutex> lg3(c->timer_guard_);
+                std::lock_guard<std::mutex> lg4(c->timer_guard_);
                 redisAsyncContext *ctx = (redisAsyncContext *)c->handle_;
                 Cluster *cluster = ((Channel *)ctx->data)->m_cluster;
                 ev_timer_stop(cluster->m_evloop, &c->timer_);
@@ -745,14 +743,13 @@ public:
 
         auto c = createCommand<ReplyT>(node->m_ctx, cmdline, nullptr, 0, 0, false);
         if (nullptr == c) return false;
-
         c->wait();
         bool successed = c->ok();
 
         if (callback) {
             callback(*c);
         }
-        c->free();
+        // c->free();
         return successed;
     }
 
@@ -861,7 +858,7 @@ public:
         bool successed = c.ok();
         if (callback)
             callback(c);
-        c.free();
+        // c.free();
 
         return successed;
     }
@@ -870,10 +867,9 @@ public:
                                              const std::vector<std::string> &cmdline,
                                              const std::function<void(Command<ReplyT>&)> &callback = nullptr)
     {
-
         if (channel == nullptr)
         {
-            std::string cmd = util::join(cmdline.begin(), cmdline.end(), std::string(""));
+            std::string cmd = util::join(cmdline.begin(), cmdline.end(), std::string(" "));
             m_logger.error() << "fource on cluster node exec command failed, channel ptr is nullptr, command: " << cmd;
             return;
         }
@@ -886,8 +882,11 @@ public:
     {
         if (channel == nullptr)
         {
+            std::string cmd = util::join(cmdline.begin(), cmdline.end(), std::string(" "));
+            m_logger.error() << "fource on cluster node exec command failed, channel ptr is nullptr, command: " << cmd;
             return false;
         }
+
         auto c = createCommand<ReplyT>(channel->m_ctx, cmdline, nullptr, 0, 0, false);
         if (nullptr == c) return false;
 
@@ -897,7 +896,7 @@ public:
         if (callback) {
             callback(*c);
         }
-        c->free();
+        // c->free();
         return successed;
     }
 

@@ -61,6 +61,7 @@ template<class ReplyT> void Command<ReplyT>::notifyAll() {
     {
         unique_lock<mutex> lk(waiter_lock_);
         waiting_done_ = true;
+        // logger_.debug() << "notify all, command id: " << id_ ;
     }
     waiter_.notify_all();
 }

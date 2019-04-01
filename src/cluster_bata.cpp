@@ -127,6 +127,8 @@ redox::cluster_bata::Cluster::~Cluster()
     if(m_event_loop_thread.joinable())
         m_event_loop_thread.join();
 
+    m_nodes.clear();
+
     if (nullptr != m_evloop)
         ev_loop_destroy(m_evloop);
 }
@@ -485,8 +487,13 @@ void redox::cluster_bata::Cluster::runEventLoop()
 
     m_logger.info() << "Stop signal detected. Closing down event loop.";
 
+    // Let go for block_until_stopped method
+    setExited(true);
+    setRunning(false);
+
     // Signal event loop to free all commands
     freeAllCommands();
+
     // Wait to receive server replies for clean hiredis disconnect
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
     ev_run(m_evloop, EVRUN_NOWAIT);
@@ -501,10 +508,6 @@ void redox::cluster_bata::Cluster::runEventLoop()
         m_logger.error() << "All commands were not freed! " << deleted << "/" << created;
     }
     m_logger.debug() << "created: " << created << ", deleted: " << deleted << ", processed: " << m_commands_callbacked;
-
-    // Let go for block_until_stopped method
-    setExited(true);
-    setRunning(false);
 
     m_logger.info() << "Event cluster thread exited.";
 }
