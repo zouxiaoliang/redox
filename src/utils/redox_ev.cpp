@@ -7,6 +7,14 @@ static void onBreakEventLoop(struct ev_loop *loop, ev_async *async, int revents)
     ev_break(loop, EVBREAK_ALL);
 }
 
+static void onEvent(struct ev_loop *loop, ev_async *async, int revents)
+{
+    EV *self = (EV *)ev_userdata(loop);
+
+    // 调用对应的处理接口
+
+}
+
 EV::EV(bool nowait, std::function<void ()> prefixCallback, std::function<void ()> postfixCallbask):
     m_nowait(nowait),
     m_prefix_callback(prefixCallback),
@@ -25,11 +33,15 @@ std::shared_ptr<EV> EV::createRedoxEv(
         std::function<void ()> prefixCallback,
         std::function<void ()> postfixCallbask)
 {
+    // 使用智能指针对内存进行管理
     std::shared_ptr<EV> ev_shared_ptr;
 
     auto ev = new (std::nothrow)EV(nowait, prefixCallback, postfixCallbask);
     if (nullptr == ev)
         return nullptr;
+
+    // 接管内存
+    ev_shared_ptr.reset(ev);
 
     signal(SIGPIPE, SIG_IGN);
 
@@ -37,13 +49,12 @@ std::shared_ptr<EV> EV::createRedoxEv(
     if (nullptr == ev->m_evloop)
         return nullptr;
 
+    ev_set_userdata(ev->m_evloop, (void *)ev); // Back-reference
 
-
-    ev_shared_ptr.reset(ev);
     return ev_shared_ptr;
 }
 
-int64_t EV::registerWatcher(TWatchHandler watcher)
+int64_t EV::registerSlot(TSlotHandler watcher)
 {
     util::WriterGuard wg(m_watcher_lock);
 
@@ -56,6 +67,10 @@ int64_t EV::registerWatcher(TWatchHandler watcher)
 
     m_watcher[watcher_id] = ew;
     m_watch_handler[ew] = watcher;
+
+    // 注册管理事件
+    ev_async_init(ew.get(), onEvent);
+    ev_async_start(m_evloop, ew.get());
 
     return watcher_id;
 }
@@ -77,6 +92,7 @@ bool EV::startup()
 
 void EV::shutdown()
 {
+    m_to_exit = true;
     ev_async_send(m_evloop, &m_watcher_stop);;
 }
 
@@ -89,6 +105,11 @@ void EV::wait()
 void EV::runOne()
 {
     ev_run(m_evloop, EVRUN_NOWAIT);
+}
+
+struct ev_loop *EV::evloop()
+{
+    return m_evloop;
 }
 
 void EV::runEventLoop()

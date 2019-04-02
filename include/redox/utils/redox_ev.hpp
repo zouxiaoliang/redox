@@ -1,7 +1,7 @@
 #ifndef REDOX_EV_HPP
 #define REDOX_EV_HPP
 
-#include <hiredis/async.h>
+// NOTE: 可以替换称对应的libev头文件
 #include <hiredis/adapters/libev.h>
 
 #include <unordered_map>
@@ -15,15 +15,13 @@
 
 namespace redox { namespace util {
 
-#if 0
-typedef void(*TWatchHandler)(struct ev_loop *loop, ev_async *async, int revent);
-#else
-typedef std::function<void(int revents)> TWatchHandler;
-#endif
-
+/**
+ * @brief The EV class 针对libev的包装，让libev用起来更简单点
+ */
 class EV
 {
 public:
+    typedef std::function<void(int revents)> TSlotHandler;
 
 private:
     EV(bool nowait,
@@ -45,16 +43,15 @@ public:
             std::function<void()> prefixCallback = nullptr,
             std::function<void()> postfixCallbask = nullptr);
 
-
     /**
-     * @brief registerWatcher 注册观察者
+     * @brief registerSlot 注册slot
      * @param watcher
      * @return sig
      */
-    int64_t registerWatcher(TWatchHandler watcher);
+    int64_t registerSlot(TSlotHandler watcher);
 
     /**
-     * @brief emitSig
+     * @brief emitSig 发射sig
      * @param sig
      */
     void emitSig(int64_t sig);
@@ -103,6 +100,11 @@ public:
      */
     void runOne();
 
+    /**
+     * @brief evloop 获取ev实例
+     * @return
+     */
+    struct ev_loop *evloop();
 private:
     /**
      * @brief runEventLoop 运行事件环
@@ -118,12 +120,15 @@ private:
     std::atomic_bool m_nowait = {false};
 
     // Variable and CV to know when the event loop stops running
-    std::atomic_bool m_to_exit = {false}; // Signal to exit
-    bool m_exited = false;  // Event thread exited
+    // Signal to exit
+    std::atomic_bool m_to_exit = {false};
+    // Event thread exited
+    bool m_exited = false;
     std::mutex m_exit_lock;
     std::condition_variable m_exit_waiter;
 
-    ev_async m_watcher_stop;            // For breaking the loop
+    // For breaking the loop
+    ev_async m_watcher_stop;
 
     // pre/post callback
     std::function<void()> m_prefix_callback;
@@ -134,7 +139,7 @@ private:
 
     // asynchronous watchers
     std::unordered_map<int64_t, std::shared_ptr<ev_async>> m_watcher;
-    std::unordered_map<std::shared_ptr<ev_async>, TWatchHandler> m_watch_handler;
+    std::unordered_map<std::shared_ptr<ev_async>, TSlotHandler> m_watch_handler;
     std::atomic_int64_t m_watcher_id_generator;
     util::RWLock m_watcher_lock;
 
