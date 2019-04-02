@@ -249,7 +249,7 @@ public:
      * @brief connectNodes 连接到集群节点
      * @return
      */
-    bool connectNodes(const std::string &cluster_nodes/*redisAsyncContext *ctx*/, std::function<void(int)> connection_callback = nullptr);
+    bool connectNodes(const std::string &cluster_nodes, std::function<void(int)> connection_callback = nullptr);
 
     /**
      * @brief isCluster 判断当前是否集群的redis环境
@@ -939,9 +939,6 @@ private:
 
     // connection callback function
     std::function<void (int)> m_user_connection_callback;
-
-    std::mutex m_connect_lock;
-    std::condition_variable m_connect_waiter;
 
     // Dynamically allocated libev event loop
     struct ev_loop *m_evloop;

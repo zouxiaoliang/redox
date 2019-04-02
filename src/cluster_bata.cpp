@@ -228,7 +228,7 @@ void redox::cluster_bata::Cluster::wait()
     m_exit_waiter.wait(ul, [this] {return m_exited;});
 }
 
-bool redox::cluster_bata::Cluster::connectNodes(const std::string &cluster_nodes/*redisAsyncContext *ctx*/, std::function<void (int)> connection_callback)
+bool redox::cluster_bata::Cluster::connectNodes(const std::string &cluster_nodes, std::function<void (int)> connection_callback)
 {
     // if libev event loop not init, must init libe
     if (nullptr == m_evloop)
@@ -535,7 +535,6 @@ void redox::cluster_bata::Cluster::processDisconnection(struct ev_loop *loop, ev
 void redox::cluster_bata::Cluster::processQueuedCommands(struct ev_loop *loop, ev_async *async, int revents)
 {
     Cluster *cluster = (Cluster *)ev_userdata(loop);
-
     std::lock_guard<std::mutex> lg(cluster->m_queue_lock);
 
     while (!cluster->m_command_queue.empty()) {

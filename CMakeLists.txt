@@ -98,12 +98,14 @@ set(INC_REDOX_CORE
 
 set(SRC_REDOX_UTILS
     ${SRC_REDOX_DIR}/utils/logger.cpp
-    ${SRC_REDOX_DIR}/utils/helper.cpp)
+    ${SRC_REDOX_DIR}/utils/helper.cpp
+    ${SRC_REDOX_DIR}/utils/redox_ev.cpp)
 
 set(INC_REDOX_UTILS
     ${INC_REDOX_DIR}/redox/utils/logger.hpp
     ${INC_REDOX_DIR}/redox/utils/helper.hpp
-    ${INC_REDOX_DIR}/redox/utils/rwlock.hpp)
+    ${INC_REDOX_DIR}/redox/utils/rwlock.hpp
+    ${INC_REDOX_DIR}/redox/utils/redox_ev.hpp)
 
 set(INC_REDOX_WRAPPER ${INC_REDOX_DIR}/redox.hpp)
 
