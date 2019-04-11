@@ -423,7 +423,7 @@ public:
             std::lock_guard<std::mutex> lg(m_exit_lock);
             m_exited = exited;
         }
-        m_exit_waiter.notify_one();
+        m_exit_waiter.notify_all();
     }
 
     /**
@@ -679,6 +679,43 @@ public:
         return len;
     }
 
+    template<typename ReplyT> void commandOn(std::shared_ptr<Channel> channel,
+                                             const std::vector<std::string> &cmdline,
+                                             const std::function<void(Command<ReplyT>&)> &callback = nullptr)
+    {
+        if (channel == nullptr)
+        {
+            std::string cmd = util::join(cmdline.begin(), cmdline.end(), std::string(" "));
+            m_logger.error() << "fource on cluster node exec command failed, channel ptr is nullptr, command: " << cmd;
+            return;
+        }
+        createCommand<ReplyT>(channel->m_ctx, cmdline, callback);
+    }
+
+    template<typename ReplyT> bool commandSyncOn(std::shared_ptr<Channel> channel,
+                                                 const std::vector<std::string> &cmdline,
+                                                 const std::function<void(Command<ReplyT>&)> &callback = nullptr)
+    {
+        if (channel == nullptr)
+        {
+            std::string cmd = util::join(cmdline.begin(), cmdline.end(), std::string(" "));
+            m_logger.error() << "fource on cluster node exec command failed, channel ptr is nullptr, command: " << cmd;
+            return false;
+        }
+
+        auto c = createCommand<ReplyT>(channel->m_ctx, cmdline, nullptr, 0, 0, false);
+        if (nullptr == c) return false;
+
+        c->wait();
+        bool successed = c->ok();
+
+        if (callback) {
+            callback(*c);
+        }
+        // c->free();
+        return successed;
+    }
+
     /**
      * @brief command 异步执行命令，通过callback函数对，结果进行处理
      * @param cmdline 命令
@@ -835,9 +872,9 @@ public:
         // TODO: findNodeBySlot转移到ev_loop内执行
         util::ReaderGuard guard(m_nodes_lock);
         std::shared_ptr<Channel> node = nullptr;
-        if (cmdline.size() > 1)
+        if (keys.size() > 1)
         {
-            std::string key = cmdline[1];
+            std::string key = keys[1];
             uint32_t slot = util::hash_slot(key.c_str(), key.length());
             node = this->findNodeBySlot(slot);
         }
@@ -853,51 +890,7 @@ public:
             return false;
         }
 
-
-        Command<ReplyT> &c = commandSync<ReplyT>(cmdline);
-        bool successed = c.ok();
-        if (callback)
-            callback(c);
-        // c.free();
-
-        return successed;
-    }
-
-    template<typename ReplyT> void commandOn(std::shared_ptr<Channel> channel,
-                                             const std::vector<std::string> &cmdline,
-                                             const std::function<void(Command<ReplyT>&)> &callback = nullptr)
-    {
-        if (channel == nullptr)
-        {
-            std::string cmd = util::join(cmdline.begin(), cmdline.end(), std::string(" "));
-            m_logger.error() << "fource on cluster node exec command failed, channel ptr is nullptr, command: " << cmd;
-            return;
-        }
-        createCommand<ReplyT>(channel->m_ctx, cmdline, callback);
-    }
-
-    template<typename ReplyT> bool commandSyncOn(std::shared_ptr<Channel> channel,
-                                                 const std::vector<std::string> &cmdline,
-                                                 const std::function<void(Command<ReplyT>&)> &callback = nullptr)
-    {
-        if (channel == nullptr)
-        {
-            std::string cmd = util::join(cmdline.begin(), cmdline.end(), std::string(" "));
-            m_logger.error() << "fource on cluster node exec command failed, channel ptr is nullptr, command: " << cmd;
-            return false;
-        }
-
-        auto c = createCommand<ReplyT>(channel->m_ctx, cmdline, nullptr, 0, 0, false);
-        if (nullptr == c) return false;
-
-        c->wait();
-        bool successed = c->ok();
-
-        if (callback) {
-            callback(*c);
-        }
-        // c->free();
-        return successed;
+        return commandSyncOn<ReplyT>(node, cmdline, callback);
     }
 
     /**

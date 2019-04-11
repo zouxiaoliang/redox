@@ -119,7 +119,10 @@ template <class ReplyT> void Command<ReplyT>::processReply(redisReply *r, std::f
     std::pair<string, int32_t> where;
     if (moved(where) && move_to_other) {
         move_to_other(where.first, where.second);
+        return;
     } else {
+        if (OK_REPLY != reply_status_)
+            logger_.error() << cmd() << ": " << last_error_;
         invoke();
     }
 
@@ -202,7 +205,7 @@ template <class ReplyT> bool Command<ReplyT>::isExpectedReply(int type) {
     errorMessage << "Received reply of type " << reply_obj_->type << ", expected type " << type
                  << ".";
     last_error_ = errorMessage.str();
-    logger_.error() << cmd() << ": " << last_error_;
+    // logger_.error() << cmd() << ": " << last_error_;
     reply_status_ = WRONG_TYPE;
     return false;
 }
@@ -221,7 +224,7 @@ template <class ReplyT> bool Command<ReplyT>::isExpectedReply(int typeA, int typ
     errorMessage << "Received reply of type " << reply_obj_->type << ", expected type " << typeA
                  << " or " << typeB << ".";
     last_error_ = errorMessage.str();
-    logger_.error() << cmd() << ": " << last_error_;
+    // logger_.error() << cmd() << ": " << last_error_;
     reply_status_ = WRONG_TYPE;
     return false;
 }
@@ -233,7 +236,7 @@ template <class ReplyT> bool Command<ReplyT>::checkErrorReply() {
             last_error_ = reply_obj_->str;
         }
 
-        logger_.error() << "checkErrorReply: " << cmd() << ": " << last_error_;
+        // logger_.error() << "checkErrorReply: " << cmd() << ": " << last_error_;
         reply_status_ = ERROR_REPLY;
         return true;
     }

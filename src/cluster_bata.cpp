@@ -105,7 +105,7 @@ bool redox::cluster_bata::Channel::connect()
 
 void redox::cluster_bata::Channel::disconnect()
 {
-    std::cout << "redox::cluster_bata::Channel::disconnect (" << m_client_host << ":" << m_client_port << ")" << std::endl;
+    // std::cout << "redox::cluster_bata::Channel::disconnect (" << m_client_host << ":" << m_client_port << ")" << std::endl;
     if (nullptr != m_ctx)
         redisAsyncDisconnect(m_ctx);
 }
@@ -114,7 +114,8 @@ redox::cluster_bata::Cluster::Cluster(std::ostream &log_stream, redox::log::Leve
     m_logger(log_stream, log_level),
     m_log_stream(log_stream),
     m_log_level(log_level),
-    m_user_connection_callback(nullptr)
+    m_user_connection_callback(nullptr),
+    m_evloop(nullptr)
 {
     initEv();
 }
@@ -521,7 +522,7 @@ void redox::cluster_bata::Cluster::processConnection(struct ev_loop *loop, ev_as
 void redox::cluster_bata::Cluster::processDisconnection(struct ev_loop *loop, ev_async *async, int revents)
 {
     Cluster *cluster = (Cluster *)ev_userdata(loop);
-    util::WriterGuard guard(cluster->m_nodes_lock);
+    // util::WriterGuard guard(cluster->m_nodes_lock);
     for (auto node: cluster->m_nodes)
     {
         if (nullptr == node)
